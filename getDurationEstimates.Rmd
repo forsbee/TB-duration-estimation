@@ -1,0 +1,478 @@
+---
+title: "Duration Calculations"
+author: "Laura F White"
+date: "2023-06-07"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, include=FALSE}
+source("utils.R")
+library(readxl)
+library(ggplot2)
+library(reshape)
+library(reshape2)
+library(RColorBrewer)
+library(ggpubr)
+library(gridExtra)
+library(grid)
+library(scales)
+library(dplyr)
+library(data.table)
+library(xlsx)
+library(kableExtra)
+```
+
+```{r,include=F}
+dat <- read_excel("data/Duration Spreadsheet revised 3.27.23.xlsx",sheet="Sheet2")
+```
+
+## Methods
+
+### Estimation of the annual rate of change of TB
+We aim to estimate the duration of TB disease in countries with two TB prevalence surveys. Our general approach is to estimate the annual rate of change of TB prevalence based on these two time points. Where possible, we use the estimated TB prevalence for the entire population. To estimate the rate of change, we use the basic formula $p_2=r^t p_1$, where $p_2$ and $p_1$ are the second and first prevalence surveys, respectively and $r$ is the annual rate of change as estimated during the time period $t$ between the two prevalence surveys. When adjustments have been done by other resarchers to estimate a percent change in prevalence between the two surveys, we use those to estimate the first survey prevelance, using $\Delta=\frac{p_1-p_2}{p_1}$, where $\Delta$ is the proportional change between the two surveys.  
+
+### Estimation of the duration of disease
+Using the rate of change in TB prevalence, we estimate the prevalence of TB disease for the entire population in the year prior to the last TB prevalence survey. Then using the publicly reported number of TB notifications, the rate of treatment completion and the number of deaths, we calculate the estimated incidence for the year of the last prevalence survey. With this estimated incidence and the prevalence survey estimate of TB prevalence, we calculate the duration as the ratio of prevalence and incidence.
+
+We provide more detail on the estimates for each country below.
+
+## Country specific Estimates
+
+### Bangledesh
+
+```{r, echo=FALSE}
+country.tmp <- "Bangladesh"
+bang.ann.rate <- getRateofChange(prev1=79,prev2=113,year1=2007,year2=2015)
+
+bang.ests <- getDuration(r=bang.ann.rate,
+                         prev2=dat$`TB Prevalence all forms all ages in target year`[dat$Country==country.tmp],
+                         tot.pop=dat$Population[dat$Country==country.tmp],
+                         cure.rate=dat$`Treatment completion`[dat$Country==country.tmp],
+                         num.deaths=dat$`TB Deaths`[dat$Country==country.tmp],
+                         notifications=dat$Notifications[dat$Country==country.tmp])
+
+bang.CIs <- calcCIs(r=bang.ann.rate,
+                         prev2=dat$`TB Prevalence all forms all ages in target year`[dat$Country==country.tmp],
+                         tot.pop=dat$Population[dat$Country==country.tmp],
+                         cure.rate=dat$`Treatment completion`[dat$Country==country.tmp],
+                         num.deaths=dat$`TB Deaths`[dat$Country==country.tmp],
+                         notifications=dat$Notifications[dat$Country==country.tmp],
+                         prev.lcl=225,prev.ucl=346)
+bang.prev1 <- dat$`TB Prevalence all forms all ages in target year`[dat$Country==country.tmp]/(bang.ann.rate^(2015-2007))
+
+bang.res <- combineResults(getDurationResults=bang.ests,calcCIsResults=bang.CIs,countryName=country.tmp,prev1=bang.prev1)
+
+```
+
+The 2015-2016 survey in Bangladesh revealed a prevalence of bacteriologically confirmed TB among persons 15 years of age or greater of 287 (244-330) per 100,000 persons and for the total population, the corresponding estimates were 260 (220-301).(REF 2) The 2007 survey only assessed smear-positivity and yielded a prevalence of 79 (47-134) in those 15 years of age and older; in 2015-2016 the prevalence of smear-positive TB in this age group was 113 (87-139). We use these estimates to calculate a rate of change of `r round(bang.ann.rate,2)`.
+
+### Vietnam
+
+```{r, echo=FALSE}
+country.tmp <- "Vietnam"
+viet.ann.rate <- 1-0.045
+viet.ests <- getDuration(r=viet.ann.rate,
+                         prev2=dat$`TB Prevalence all forms all ages in target year`[dat$Country==country.tmp],
+                         tot.pop=dat$Population[dat$Country==country.tmp],
+                         cure.rate=dat$`Treatment completion`[dat$Country==country.tmp],
+                         num.deaths=dat$`TB Deaths`[dat$Country==country.tmp],
+                         notifications=dat$Notifications[dat$Country==country.tmp])
+
+viet.CIs <- calcCIs(r=1-0.045,
+                         prev2=dat$`TB Prevalence all forms all ages in target year`[dat$Country==country.tmp],
+                         tot.pop=dat$Population[dat$Country==country.tmp],
+                         cure.rate=dat$`Treatment completion`[dat$Country==country.tmp],
+                         num.deaths=dat$`TB Deaths`[dat$Country==country.tmp],
+                         notifications=dat$Notifications[dat$Country==country.tmp],
+                         prev.lcl=225,prev.ucl=346)
+
+viet.prev1 <- dat$`TB Prevalence all forms all ages in target year`[dat$Country==country.tmp]/(viet.ann.rate^(2017-2007))
+
+viet.res <- combineResults(getDurationResults=viet.ests,calcCIsResults=viet.CIs,countryName=country.tmp,prev1=viet.prev1)
+
+```
+
+The 2007 survey results are summarized in the WHO compendium. The survey found a prevalence of bacteriologically confirmed TB among those 15 years of age and older to be 307 (249-366) per 100,000. “When extrapolated to all forms of TB and all ages, prevalence was estimated as 266 (95% CI: 117-477) per 100,000 population.” The second survey in 2017-2018 found a prevalence of bacteriologically confirmed TB among those 15 years of age and older of 322 (260-399) per 100,000 (REF 3) However, the methods used in the two surveys differed substantially. A subsequent publication adjusted the results so that the two surveys could be directly compared and found that prevalence of culture-positive TB declined by an average annual decline of 4.5% between the two surveys.(REF 12) The results of the 2017-2018 survey were then extrapolated to all forms of TB and all ages using the multiplier applied in 2007 (266/307), resulting in a prevalence of 279 (95% CI: 225-346) per 100,000 population.   
+
+### Indonesia
+
+```{r, echo=FALSE}
+country.tmp <- "Indonesia"
+
+indo.ann.rate <- getRateofChange(prev1=120,prev2=180,year1=2004,year2=2013)
+
+indo.ests <- getDuration(r=indo.ann.rate,
+                         prev2=dat$`TB Prevalence all forms all ages in target year`[dat$Country==country.tmp],
+                         tot.pop=dat$Population[dat$Country==country.tmp],
+                         cure.rate=dat$`Treatment completion`[dat$Country==country.tmp],
+                         num.deaths=dat$`TB Deaths`[dat$Country==country.tmp],
+                         notifications=dat$Notifications[dat$Country==country.tmp])
+
+indo.CIs <- calcCIs(r=indo.ann.rate,
+                         prev2=dat$`TB Prevalence all forms all ages in target year`[dat$Country==country.tmp],
+                         tot.pop=dat$Population[dat$Country==country.tmp],
+                         cure.rate=dat$`Treatment completion`[dat$Country==country.tmp],
+                         num.deaths=dat$`TB Deaths`[dat$Country==country.tmp],
+                         notifications=dat$Notifications[dat$Country==country.tmp],
+                         prev.lcl=523,prev.ucl=813)
+
+indo.prev1 <- dat$`TB Prevalence all forms all ages in target year`[dat$Country==country.tmp]/(indo.ann.rate^(2013.5-2004))
+
+indo.res <- combineResults(getDurationResults=indo.ests,calcCIsResults=indo.CIs,countryName=country.tmp,prev1=indo.prev1)
+```
+
+The 2004 survey results were reported in 2007.[S1] That survey used symptom screening followed by microscopy and culture in all those with a positive symptom screen; chest radiography was not performed. The survey found a prevalence of 120 (79-161) smear-positive cases per 100,000 adults and children. We compare this to the 2013-2014 survey result of 257 (210-303) cases of smear-positive TB, only 70% of whom were symptomatic. Thus, per the criteria of the 2004 survey, only 180 persons would have been detected. We use these two numbers over the 9.5 year period to calculate an annual rate of change in TB prevalence of `r round(indo.ann.rate,2)`. 
+
+The 2013-2014 survey found a prevalence of bacteriologically confirmed TB among those 15 years of age and older of 759 (590-961) per 100,000. When extrapolated to all forms of TB and all ages, prevalence was estimated as 660 (95% CI: 523-813) per 100,000 population. We use this prevalence estimate to calculate the disease duration.
+
+### Philippines
+ 
+
+```{r, echo=FALSE}
+country.tmp <- "Philippines"
+rate.change.10y <- 0.105
+phil.prev1 <- 982/(1-rate.change.10y) 
+phil.ann.rate <- getRateofChange(prev1=phil.prev1,prev2=982,year1=2007,year2=2016)
+
+phil.ests <- getDuration(r=phil.ann.rate,
+                         prev2=dat$`TB Prevalence all forms all ages in target year`[dat$Country==country.tmp],
+                         tot.pop=dat$Population[dat$Country==country.tmp],
+                         cure.rate=dat$`Treatment completion`[dat$Country==country.tmp],
+                         num.deaths=dat$`TB Deaths`[dat$Country==country.tmp],
+                         notifications=dat$Notifications[dat$Country==country.tmp])
+
+phil.CIs <- calcCIs(r=phil.ann.rate,
+                         prev2=dat$`TB Prevalence all forms all ages in target year`[dat$Country==country.tmp],
+                         tot.pop=dat$Population[dat$Country==country.tmp],
+                         cure.rate=dat$`Treatment completion`[dat$Country==country.tmp],
+                         num.deaths=dat$`TB Deaths`[dat$Country==country.tmp],
+                         notifications=dat$Notifications[dat$Country==country.tmp],
+                         prev.lcl=862,prev.ucl=1100)
+
+phil.prev1 <- dat$`TB Prevalence all forms all ages in target year`[dat$Country==country.tmp]/(phil.ann.rate^(2016-2007))
+
+phil.res <- combineResults(getDurationResults=phil.ests,calcCIsResults=phil.CIs,countryName=country.tmp,prev1=phil.prev1)
+```
+
+The estimated prevalence for all ages in 2007 is 576 (515-640) and in 2016 this increased to 982 (862-1100) per 100,000.
+
+The 2007 survey results revealed a prevalence of bacteriologically confirmed TB among persons 10 years of age or greater of 660 (530-800) per 100,000 and for the total population, the corresponding estimates were 576 (515-640).[2] The 2016 survey found a prevalence of bacteriologically confirmed TB among those 15 years of age and older to be 1159 (1016-1301) per 100,000. The estimate for TB of all forms and all ages was 982 (862-1100) per 100,000 population.[2] When these results are adjusted for the differences between the surveys, the overall estimated change in TB prevalence during this 10 year time period is 10.5%. This leads to an estimated annual rate of change in prevalence of `r round(phil.ann.rate,2)`.
+
+### China
+
+```{r, echo=FALSE}
+country.tmp <- "China"
+china.perc.change <- 0.35
+china.prev1 <- dat$`TB Prevalence all forms all ages in target year`[dat$Country==country.tmp]/(1-china.perc.change)
+
+china.ann.rate <- getRateofChange(prev1=china.prev1,prev2=108,year1=2000,year2=2010)
+
+china.ests <- getDuration(r=china.ann.rate,
+                         prev2=dat$`TB Prevalence all forms all ages in target year`[dat$Country==country.tmp],
+                         tot.pop=dat$Population[dat$Country==country.tmp],
+                         cure.rate=dat$`Treatment completion`[dat$Country==country.tmp],
+                         num.deaths=dat$`TB Deaths`[dat$Country==country.tmp],
+                         notifications=dat$Notifications[dat$Country==country.tmp])
+
+china.CIs <- calcCIs(r=china.ann.rate,
+                         prev2=dat$`TB Prevalence all forms all ages in target year`[dat$Country==country.tmp],
+                         tot.pop=dat$Population[dat$Country==country.tmp],
+                         cure.rate=dat$`Treatment completion`[dat$Country==country.tmp],
+                         num.deaths=dat$`TB Deaths`[dat$Country==country.tmp],
+                         notifications=dat$Notifications[dat$Country==country.tmp],
+                         prev.lcl=94,prev.ucl=123)
+
+china.res <- combineResults(getDurationResults=china.ests,calcCIsResults=china.CIs,countryName=country.tmp,prev1=china.prev1)
+```
+
+
+The 2010 survey in China revealed a prevalence of bacteriologically confirmed TB among persons 15 years of age or greater of 119 (103-135) per 100,000 persons and for the total population, the corresponding estimates were 108 (94-123).[2] An analysis comparing bacteriologically positive prevalence in the 1990, 2000 and 2010 surveys adjusting for differences in study design showed a decrease of 35% between 2000 and 2010, meaning the estimated prevalence in 2000 relative to 2010 was `r china.prev1`.   
+
+### Cambodia
+
+```{r, echo=FALSE}
+country.tmp <- "Cambodia"
+cam.perc.change <- 0.452
+cam.prev1 <- dat$`TB Prevalence all forms all ages in target year`[dat$Country==country.tmp]/(1-cam.perc.change)
+
+cam.ann.rate <- getRateofChange(prev1=cam.prev1,prev2=817,year1=2002,year2=2010)
+
+cam.ests <- getDuration(r=cam.ann.rate,
+                         prev2=dat$`TB Prevalence all forms all ages in target year`[dat$Country==country.tmp],
+                         tot.pop=dat$Population[dat$Country==country.tmp],
+                         cure.rate=dat$`Treatment completion`[dat$Country==country.tmp],
+                         num.deaths=dat$`TB Deaths`[dat$Country==country.tmp],
+                         notifications=dat$Notifications[dat$Country==country.tmp])
+
+cam.CIs <- calcCIs(r=cam.ann.rate,
+                         prev2=dat$`TB Prevalence all forms all ages in target year`[dat$Country==country.tmp],
+                         tot.pop=dat$Population[dat$Country==country.tmp],
+                         cure.rate=dat$`Treatment completion`[dat$Country==country.tmp],
+                         num.deaths=dat$`TB Deaths`[dat$Country==country.tmp],
+                         notifications=dat$Notifications[dat$Country==country.tmp],
+                         prev.lcl=690,prev.ucl=954)
+
+cam.res <- combineResults(getDurationResults=cam.ests,calcCIsResults=cam.CIs,countryName=country.tmp,prev1=cam.prev1)
+```
+ 
+
+The 2010-2011 survey in Cambodia revealed a prevalence of bacteriologically confirmed TB among persons 15 years of age or greater of 831 (707-977) per 100,000 persons and for the total population, the corresponding estimates were 817 (690-954).[2] An analysis comparing the results of the 2002 and 2011 surveys adjusting for differences in the methodologies revealed a 45.2% reduction in prevalence over the 9-year period, meaning the estimated prevalence in 2002 was `r cam.prev1`.[13] This leads to an annual estimate of the rate of change in TB prevalence of `r round(cam.ann.rate,2)`.
+
+### Myanmar
+
+```{r, echo=FALSE}
+country.tmp <- "Myanmar"
+mya.perc.change <- 0.51
+mya.prev1 <- 415/(1-mya.perc.change)
+
+mya.ann.rate <- getRateofChange(prev1=mya.prev1,prev2=415,year1=2009,year2=2017)
+
+mya.ests <- getDuration(r=mya.ann.rate,
+                         prev2=415,
+                         tot.pop=dat$Population[dat$Country==country.tmp],
+                         cure.rate=dat$`Treatment completion`[dat$Country==country.tmp],
+                         num.deaths=dat$`TB Deaths`[dat$Country==country.tmp],
+                         notifications=dat$Notifications[dat$Country==country.tmp])
+
+mya.CIs <- calcCIs(r=mya.ann.rate,
+                         prev2=415,
+                         tot.pop=dat$Population[dat$Country==country.tmp],
+                         cure.rate=dat$`Treatment completion`[dat$Country==country.tmp],
+                         num.deaths=dat$`TB Deaths`[dat$Country==country.tmp],
+                         notifications=dat$Notifications[dat$Country==country.tmp],
+                         prev.lcl=327,prev.ucl=500)
+
+mya.res <- combineResults(getDurationResults=mya.ests,calcCIsResults=mya.CIs,countryName=country.tmp,prev1=mya.prev1)
+```
+
+The 2017-2018 survey in Myanmar revealed a prevalence of bacteriologically confirmed TB among persons 15 years of age or greater of 468 (391-546) per 100,000 persons.[4] A prevalence for the total population was not reported for the 2017-2018 survey, but by analogy with this extrapolation in the 2009-2010 survey it is estimated to be 415 (327-500).[2] When the results of the 2009-2010 survey were adjusted to be comparable to those of the 2017-2018 survey, a 51% reduction in cases was observed between the two surveys. This implies that the prevalence in 2009-2010 was `r mya.prev1`.[4] From this we estimate an annual rate of change in prevalence of `r round(mya.ann.rate,2)`.
+
+### Aggregate results
+
+First we provide information on the data that went into the calculations. Note that the first prevalence is an estimate derived from the second prevalence survey estimate and using a spearately reported adjusted change in prevelance.
+
+```{r, echo=FALSE}
+
+all.results <- as.data.frame(rbind(bang.res,china.res,mya.res,cam.res,viet.res,phil.res,indo.res))
+row.names(all.results) <- NULL
+names(all.results) <- c("Country","Population","First Prev(per 100k)","Second Prev (per 100k)","Number Cases",
+               "Cases year prior","Prev rate change","Notifications",
+               "Treatment Probability","Number treated","Number Deaths","Incident Cases",
+               "Incidence Rate (per 100k)","Incidence LCL","Incidence UCL",
+               "Duration (yrs)","Duration LCL",
+               "Duration UCL",
+               "Removal Rate (divided by prevalence)","Removal Rate (divided by incidence)")
+
+#all.results %>% kbl() %>% kable_styling()
+
+# first do table of just information that is put into the model
+## country, population, pre1 year, pre1, pre2 year, prev 2, treatment rate, number of deaths, notifications
+times.1 <- c("2007","2000","2009-10","2002","2007","2007","2004")
+times.2 <- c("2015","2010","2017-18","2011","2017","2016","2013-14")
+input.data <- cbind(all.results[,c(1,2)],times.1,all.results[,3],times.2,all.results[,c(4,9,11,8)])
+names(input.data) <- c("Country","Population","First survey year","First Prev(per 100k)",
+                               "Second survey year","Second Prev (per 100k)",
+                   "Treatment Probability","Number Deaths","Notifications")
+
+input.data %>% kbl() %>% kable_styling()
+
+```
+
+Next we provide all of the results.
+
+```{r, echo=FALSE}
+
+results.table <- as.data.frame(cbind(all.results[,c(1,5,6,7,12:20)]))
+names(results.table) <- c("Country","Number Cases","Cases year prior","Prev rate change","Incident Cases",
+               "Incidence Rate (per 100k)","Incidence LCL","Incidence UCL","Duration (yrs)","Duration LCL",
+               "Duration UCL",
+               "Removal Rate (divided by prevalence)","Removal Rate (divided by incidence)")
+
+results.table %>% kbl() %>% kable_styling()
+
+```
+
+### Plot the results
+
+#### Figure 1a
+
+```{r, echo=FALSE}
+# plot duration versus proportion prevalent cases removed via death or cure
+## plot duration on y axis: first get best fit line for the data
+fit1a <- lm(as.numeric(all.results[,16])~as.numeric(all.results[,19]))
+
+# basic R plot
+plot(all.results[,19],all.results[,16],xlim=c(0,1),ylim=c(0,5),ylab="Duration (years)",xlab="Proportion of people exiting the pool annually via cure or death",pch=c("B","H","M","C","V","P","I"))
+legend("topright",all.results[,1],pch=c("B","H","M","C","V","P","I"))
+abline(a=fit1a$coefficients[1],b=fit1a$coefficients[2])
+
+# ggplot version with confidence bounds
+all.results$plot.char <- c("B","H","M","C","V","P","I")
+
+ggplot(all.results, aes(as.numeric(all.results[,19]),as.numeric(all.results[,16]))) +        
+  geom_point() +
+  theme_bw() +
+  geom_text(aes(label=Country),nudge_y=-0.07,hjust="inward") +
+  xlab("Proportion of people exiting the pool annually via cure or death") +
+  ylab("Duration (years)") +
+  geom_errorbar(aes(ymin = as.numeric(all.results[,17]), ymax = as.numeric(all.results[,18])),width=0.02)+
+  geom_abline(intercept=fit1a$coefficients[1],slope=fit1a$coefficients[2],linetype="dashed")
+
+```
+
+```{r,echo=FALSE, include=FALSE}
+png("plots/figure1a.png")
+plot(all.results[,19],all.results[,16],xlim=c(0,1),ylim=c(0,5),ylab="Duration (years)",xlab="Proportion of people exiting the pool annually via cure or death",pch=c("B","H","M","C","V","P","I"))
+legend("topright",all.results[,1],pch=c("B","H","M","C","V","P","I"))
+abline(a=fit1a$coefficients[1],b=fit1a$coefficients[2])
+dev.off()
+
+# ggplot version with confidence bounds
+png("plots/figure1a_ggplot.png")
+ggplot(all.results, aes(as.numeric(all.results[,19]),as.numeric(all.results[,16]))) +        
+  geom_point() +
+  theme_bw() +
+  geom_text(aes(label=Country),nudge_y=-0.07,hjust="inward") +
+  xlab("Proportion of people exiting the pool annually via cure or death") +
+  ylab("Duration (years)") +
+  geom_errorbar(aes(ymin = as.numeric(all.results[,17]), ymax = as.numeric(all.results[,18])),width=0.02)+
+  geom_abline(intercept=fit1a$coefficients[1],slope=fit1a$coefficients[2],linetype="dashed")
+dev.off()
+```
+
+Here the slope of the line is `r round(fit1a$coefficients[2],2)`.
+
+#### Figure 1b
+```{r, echo=FALSE}
+# plot duration versus proportion prevalent cases removed via cure
+new.removal.rate <- (as.numeric(all.results[,19])*as.numeric(all.results[,5])-as.numeric(all.results[,11]))/as.numeric(all.results[,5])
+
+fit1b <- lm(as.numeric(all.results[,16])~new.removal.rate)
+
+plot(new.removal.rate,all.results[,16],xlim=c(0,1),ylim=c(0,5),ylab="Duration (years)",xlab="Proportion of people exiting the pool annually via cure",pch=c("B","H","M","C","V","P","I"))
+legend("topright",all.results[,1],pch=c("B","H","M","C","V","P","I"))
+abline(a=fit1b$coefficients[1],b=fit1b$coefficients[2])
+
+# ggplot version with confidence bounds
+all.results$new.removal.rate <- new.removal.rate
+ggplot(all.results, aes(new.removal.rate,as.numeric(all.results[,16]))) +        
+  geom_point() +
+  theme_bw() +
+  geom_text(aes(label=Country),nudge_y=-0.07,hjust="inward") +
+  xlab("Proportion of people exiting the pool annually via cure") +
+  ylab("Duration (years)") +
+  geom_errorbar(aes(ymin = as.numeric(all.results[,17]), ymax = as.numeric(all.results[,18])),width=0.02)+
+  geom_abline(intercept=fit1b$coefficients[1],slope=fit1a$coefficients[2],linetype="dashed")
+```
+
+```{r, echo=FALSE, include=FALSE}
+png("plots/figure1b.png")
+plot(new.removal.rate,all.results[,16],xlim=c(0,1),ylim=c(0,5),ylab="Duration (years)",xlab="Proportion of people exiting the pool annually via cure",pch=c("B","H","M","C","V","P","I"))
+legend("topright",all.results[,1],pch=c("B","H","M","C","V","P","I"))
+abline(a=fit1b$coefficients[1],b=fit1b$coefficients[2])
+dev.off()
+
+png("plots/plot1b_ggplot.png")
+ggplot(all.results, aes(new.removal.rate,as.numeric(all.results[,16]))) +        
+  geom_point() +
+  theme_bw() +
+  geom_text(aes(label=Country),nudge_y=-0.07,hjust="inward") +
+  xlab("Proportion of people exiting the pool annually via cure") +
+  ylab("Duration (years)") +
+  geom_errorbar(aes(ymin = as.numeric(all.results[,17]), ymax = as.numeric(all.results[,18])),width=0.02)+
+  geom_abline(intercept=fit1b$coefficients[1],slope=fit1a$coefficients[2],linetype="dashed")
+dev.off()
+
+```
+
+Here the slope of the line is `r round(fit1b$coefficients[2],2)`.
+
+
+#### Figure 2a
+```{r, echo=FALSE}
+# plot change in prevalence and number of persons with TB leaving pool of incident cases
+## transform prev rate of change
+prev.change <- round((as.numeric(all.results[,7])-1)*100,2)
+
+## first get best fit line for the data
+fit2a <- lm(prev.change~as.numeric(all.results[,20]))
+
+plot(all.results[,20],prev.change,xlim=c(0.8,1.25),ylim=c(-10,10),ylab="Annual Percent Change in Prevalence (%)",xlab="(Cures+Deaths)/Incidence",pch=c("B","H","M","C","V","P","I"))
+legend("topright",all.results[,1],pch=c("B","H","M","C","V","P","I"))
+abline(a=fit2a$coefficients[1],b=fit2a$coefficients[2])
+
+# ggplot version
+all.results$prev.change <- prev.change
+ggplot(all.results, aes(as.numeric(all.results[,20]),prev.change)) +        
+  geom_point() +
+  theme_bw() +
+  geom_text(aes(label=Country),nudge_y=-0.25,hjust="inward") +
+  xlab("(Cures+Deaths)/Incidence") +
+  ylab("Annual Percent Change in Prevalence (%)") +
+  geom_abline(intercept=fit2a$coefficients[1],slope=fit2a$coefficients[2],linetype="dashed")
+```
+
+```{r, echo=FALSE,include=FALSE}
+png("plots/figure2a.png")
+plot(all.results[,20],prev.change,xlim=c(0.8,1.25),ylim=c(-10,10),ylab="Annual Percent Change in Prevalence (%)",xlab="(Cures+Deaths)/Incidence",pch=c("B","H","M","C","V","P","I"))
+legend("topright",all.results[,1],pch=c("B","H","M","C","V","P","I"))
+abline(a=fit2a$coefficients[1],b=fit2a$coefficients[2])
+dev.off()
+
+png("plots/figure2a_ggplot.png")
+ggplot(all.results, aes(as.numeric(all.results[,20]),prev.change)) +        
+  geom_point() +
+  theme_bw() +
+  geom_text(aes(label=Country),nudge_y=-0.25,hjust="inward") +
+  xlab("(Cures+Deaths)/Incidence") +
+  ylab("Annual Percent Change in Prevalence (%)") +
+  geom_abline(intercept=fit2a$coefficients[1],slope=fit2a$coefficients[2],linetype="dashed")
+dev.off()
+```
+
+Here the slope of the line is `r round(fit2a$coefficients[2],2)`.
+
+#### Figure 2b
+```{r, echo=FALSE}
+# plot change in prevalence and number of persons with TB leaving pool of incident cases
+## first get best fit line for the data
+fit2b <- lm(prev.change~new.removal.rate)
+
+plot(new.removal.rate,prev.change,xlim=c(0,1),ylim=c(-10,10),ylab="Annual Percent Change in Prevalence (%)",xlab="Cures/Incidence",pch=c("B","H","M","C","V","P","I"))
+legend("topright",all.results[,1],pch=c("B","H","M","C","V","P","I"))
+abline(a=fit2b$coefficients[1],b=fit2b$coefficients[2])
+
+## ggplot version
+ggplot(all.results, aes(new.removal.rate,prev.change)) +        
+  geom_point() +
+  theme_bw() +
+  geom_text(aes(label=Country),nudge_y=-0.25,hjust="inward") +
+  xlab("Cures/Incidence") +
+  ylab("Annual Percent Change in Prevalence (%)") +
+  geom_abline(intercept=fit2b$coefficients[1],slope=fit2b$coefficients[2],linetype="dashed")
+
+```
+
+```{r, echo=FALSE,include=FALSE}
+png("plots/figure2b.png")
+plot(new.removal.rate,prev.change,xlim=c(0,1),ylim=c(-10,10),ylab="Annual Percent Change in Prevalence (%)",xlab="Cures/Incidence",pch=c("B","H","M","C","V","P","I"))
+legend("topright",all.results[,1],pch=c("B","H","M","C","V","P","I"))
+abline(a=fit2b$coefficients[1],b=fit2b$coefficients[2])
+dev.off()
+
+png("plots/figure2b_ggplot.png")
+ggplot(all.results, aes(new.removal.rate,prev.change)) +        
+  geom_point() +
+  theme_bw() +
+  geom_text(aes(label=Country),nudge_y=-0.25,hjust="inward") +
+  xlab("Cures/Incidence") +
+  ylab("Annual Percent Change in Prevalence (%)") +
+  geom_abline(intercept=fit2b$coefficients[1],slope=fit2b$coefficients[2],linetype="dashed")
+dev.off()
+```
+
+Here the slope of the line is `r round(fit2b$coefficients[2],2)`.
