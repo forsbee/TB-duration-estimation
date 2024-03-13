@@ -1,0 +1,418 @@
+---
+title: "Duration Calculations"
+author: "Laura F White"
+date: "2023-06-07"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, include=FALSE}
+source("utils.R")
+library(readxl)
+library(ggplot2)
+library(reshape)
+library(reshape2)
+library(RColorBrewer)
+library(ggpubr)
+library(gridExtra)
+library(grid)
+library(scales)
+library(dplyr)
+library(data.table)
+library(xlsx)
+library(kableExtra)
+library(tidyr)
+```
+
+```{r,include=F}
+# read in data
+
+# prevalence survey estimates, with years and CIs
+dat.prev <- read_excel("Data/PrevalenceSurveyData.xlsx",sheet="Sheet1")
+
+# data on treatments 
+dat.cure <- read_excel("Data/AnnualTreatments.xlsx",sheet="Sheet1")
+
+```
+
+## Methods
+
+### Estimation of the duration of disease
+We leverage countries with two prevalence surveys to determine duration and incidence of TB each year between the two prevalence surveys. To do this, we also use data on cures and deaths from TB. We assume that the ratio of prevalence to incidence is not changing over the studied time period (which implies that disease duration is also not changing). As a first, most simple approach to this problem, we determine what the ratio of prevalence to incidence must be to get us to the value of the second prevalence survey. We calculate prevalence in year $t$, $P_t$ as a function of the prior year's prevalence, number treated, number who died and the incidence in the prior year, as follows: $P_t=P_{t-1}-C_{t-1}-D_{t-1}+I_{t-1}$, where $C_t$ and $D_t$ are the number of treated (or cured) cases of TB in year $t$ and $D_t$ are the number of deaths or self cures from TB in year $t$. We assume that the number who die or self cure have an average duration of 5 years and estimate the size of this population to be $D_t=(1/\delta_u)*(P_t-C_t)$, where $\delta_u$ is the duration of untreated disease. 
+
+We observe prevalence at two time points and have annual treatment and mortality data.
+
+We provide more detail on the estimates of prevalence for each country below. We couple prevalance per 100,000 individuals with the population level estimates when the prevalence surveys were conducted to get the total number of prevalent TB cases, which we use in our calculation. 
+
+## Country specific Estimates
+
+### Bangledesh
+
+We do not have results for Bangladesh, yet. There is something odd that is producing really unusual results.
+
+```{r, echo=FALSE}
+country.tmp <- "Bangladesh"
+bang.ann.rate <- getRateofChange(prev1=79,prev2=113,year1=2007,year2=2015)
+
+bang.pop <- read.csv("Data/bang-pop.csv")
+
+bang.dat <- getDuration2(country.tmp,pop.data=bang.pop)
+bang.dat
+```
+
+
+### Vietnam
+
+```{r, echo=FALSE}
+country.tmp <- "Vietnam"
+viet.ann.rate <- 1-0.045
+viet.pop <- read.csv("Data/vietnam-pop.csv")
+
+viet.dat <- getDuration2(country.tmp="Vietnam",pop.data=viet.pop)
+
+col.names <- c("Country","Year","Prevalence","Treated","Incidence","Duration of treated disease",
+               "Prevalence per 100k","Incidence per 100k","Assumed duration of untreated disease","Proportion of prevalence cases treated","Proportion of incident cases treated")
+names(viet.dat) <- col.names
+
+viet.dat %>% kbl() %>% kable_styling()
+```
+
+
+### Indonesia
+
+```{r, echo=FALSE}
+country.tmp <- "Indonesia"
+
+indo.ann.rate <- getRateofChange(prev1=120,prev2=180,year1=2004,year2=2013.5)
+
+indo.pop <- read.csv("Data/indo-pop.csv")
+
+indo.dat <- getDuration2(country.tmp=country.tmp,pop.data=indo.pop)
+names(indo.dat) <- col.names
+indo.dat %>% kbl() %>% kable_styling()
+```
+
+
+### Philippines
+ 
+
+```{r, echo=FALSE}
+country.tmp <- "Philippines"
+rate.change.10y <- 0.105
+phil.prev1 <- dat.prev$`1st Prevalence`[dat.prev$Country==country.tmp] 
+phil.ann.rate <- getRateofChange(prev1=phil.prev1,prev2=982,year1=2007,year2=2016)
+
+phil.pop <- read.csv("Data/phil-pop.csv")
+
+phil.dat <- getDuration2(country.tmp=country.tmp,pop.data=phil.pop)
+names(phil.dat) <- col.names
+phil.dat %>% kbl() %>% kable_styling()
+```
+
+
+### China
+
+```{r, echo=FALSE}
+country.tmp <- "China"
+china.perc.change <- 0.35
+china.prev1 <- dat.prev$`1st Prevalence`[dat.prev$Country==country.tmp]
+
+china.ann.rate <- getRateofChange(prev1=china.prev1,prev2=108,year1=2000,year2=2010)
+
+china.pop <- read.csv("Data/china-pop.csv")
+
+china.dat <- getDuration2(country.tmp=country.tmp,pop.data=china.pop)
+names(china.dat) <- col.names
+china.dat %>% kbl() %>% kable_styling()
+```
+
+
+
+### Cambodia
+
+```{r, echo=FALSE}
+country.tmp <- "Cambodia"
+cam.perc.change <- 0.452
+cam.prev1 <- dat.prev$`1st Prevalence`[dat.prev$Country==country.tmp]
+
+cam.ann.rate <- getRateofChange(prev1=cam.prev1,prev2=817,year1=2002,year2=2010)
+
+cam.pop <- read.csv("Data/camb-pop.csv")
+
+cam.dat <- getDuration2(country.tmp=country.tmp,pop.data=cam.pop)
+names(cam.dat) <- col.names
+cam.dat %>% kbl() %>% kable_styling()
+```
+ 
+
+### Myanmar
+
+```{r, echo=FALSE}
+country.tmp <- "Myanmar"
+mya.perc.change <- 0.51
+mya.prev1 <- dat.prev$`1st Prevalence`[dat.prev$Country==country.tmp]
+
+mya.ann.rate <- getRateofChange(prev1=mya.prev1,prev2=415,year1=2009,year2=2017)
+
+mya.pop <- read.csv("Data/myanmar-pop.csv")
+
+mya.dat <- getDuration2(country.tmp=country.tmp,pop.data=mya.pop)
+names(mya.dat) <- col.names
+mya.dat %>% kbl() %>% kable_styling()
+```
+## Plotting the relationship between Duration and other parameters
+
+```{r, echo=F}
+# combnine all the results together
+all.results <- dplyr::bind_rows(china.dat,cam.dat,mya.dat,phil.dat,indo.dat,viet.dat)
+
+# plot duration by prevalence and incidence per 100k
+plot.prev <- ggplot(all.results, aes(`Prevalence per 100k`,`Duration of treated disease`,color=`Year`)) +        
+  geom_point(aes(shape=`Country`)) +
+  theme_bw() 
+plot.prev
+
+plot.inc <- ggplot(all.results, aes(`Incidence per 100k`,`Duration of treated disease`,color=`Year`)) +        
+  geom_point(aes(shape=`Country`)) +
+  theme_bw() 
+plot.inc
+
+# plot with proportion of TB that is treated
+plot.cure <- ggplot(all.results, aes(`Proportion of prevalence cases treated`,`Duration of treated disease`,color=`Year`)) +        
+  geom_point(aes(shape=`Country`)) +
+  theme_bw() 
+plot.cure
+
+plot.cure.inc <- ggplot(all.results, aes(`Proportion of incident cases treated`,`Duration of treated disease`,color=`Year`)) +        
+  geom_point(aes(shape=`Country`)) +
+  theme_bw() 
+plot.cure.inc
+
+```
+
+## Sensitivity analysis for duration of untreated disease
+
+We previously assumed that the duration of untreated disease is five years. We now vary this to be 4 years and 6 years to determine how much it alters the results.
+
+### Vietnam
+
+```{r, echo=FALSE}
+country.tmp <- "Vietnam"
+viet.ann.rate <- 1-0.045
+viet.pop <- read.csv("Data/vietnam-pop.csv")
+
+viet.dat.4 <- getDuration2(country.tmp="Vietnam",pop.data=viet.pop,unDxTBdur=4)
+names(viet.dat.4) <- col.names
+
+viet.dat.6 <- getDuration2(country.tmp="Vietnam",pop.data=viet.pop,unDxTBdur=6)
+names(viet.dat.6) <- col.names
+
+viet.all <- dplyr::bind_rows(viet.dat.4,viet.dat,viet.dat.6)
+
+viet.all %>% kbl() %>% kable_styling()
+
+# create plot of results
+ggplot(viet.all,aes(as.factor(`Year`),`Prevalence per 100k`,color=as.factor(`Assumed duration of untreated disease`))) + 
+  geom_point() +
+  theme_bw() +
+  xlab("Year") +
+  labs(color="Assumed duration of untreated disease") +
+  ggtitle("Vietnam")
+```
+
+
+### Indonesia
+
+```{r, echo=FALSE}
+country.tmp <- "Indonesia"
+
+indo.ann.rate <- getRateofChange(prev1=120,prev2=180,year1=2004,year2=2013.5)
+
+indo.pop <- read.csv("Data/indo-pop.csv")
+
+indo.dat.4 <- getDuration2(country.tmp="Indonesia",pop.data=indo.pop,unDxTBdur=4)
+names(indo.dat.4) <- col.names
+
+indo.dat.6 <- getDuration2(country.tmp="Indonesia",pop.data=indo.pop,unDxTBdur=6)
+names(indo.dat.6) <- col.names
+
+indo.all <- dplyr::bind_rows(indo.dat.4,indo.dat,indo.dat.6)
+
+indo.all %>% kbl() %>% kable_styling()
+
+# create plot of results
+ggplot(indo.all,aes(as.factor(`Year`),`Prevalence per 100k`,color=as.factor(`Assumed duration of untreated disease`))) + 
+  geom_point() +
+  theme_bw() +
+  xlab("Year") +
+  labs(color="Assumed duration of untreated disease") +
+  ggtitle("Indonesia") +
+  geom_point(aes(x=as.factor(2014),y=dat.prev$`2nd Survey Prevalence`[dat.prev$Country==country.tmp]),color="black",shape=3)
+```
+
+
+### Philippines
+ 
+
+```{r, echo=FALSE}
+country.tmp <- "Philippines"
+rate.change.10y <- 0.105
+phil.prev1 <- dat.prev$`1st Prevalence`[dat.prev$Country==country.tmp] 
+phil.ann.rate <- getRateofChange(prev1=phil.prev1,prev2=982,year1=2007,year2=2016)
+
+phil.pop <- read.csv("Data/phil-pop.csv")
+
+phil.dat.4 <- getDuration2(country.tmp=country.tmp,pop.data=phil.pop,unDxTBdur=4)
+names(phil.dat.4) <- col.names
+
+phil.dat.6 <- getDuration2(country.tmp=country.tmp,pop.data=phil.pop,unDxTBdur=6)
+names(phil.dat.6) <- col.names
+
+phil.all <- dplyr::bind_rows(phil.dat.4,phil.dat,phil.dat.6)
+
+phil.all %>% kbl() %>% kable_styling()
+
+# create plot of results
+ggplot(phil.all,aes(as.factor(`Year`),`Prevalence per 100k`,color=as.factor(`Assumed duration of untreated disease`))) + 
+  geom_point() +
+  theme_bw() +
+  xlab("Year") +
+  labs(color="Assumed duration of untreated disease") +
+  ggtitle(country.tmp) +
+  geom_point(aes(x=as.factor(2016),y=dat.prev$`2nd Survey Prevalence`[dat.prev$Country==country.tmp]),color="black",shape=3)
+```
+
+
+### China
+
+```{r, echo=FALSE}
+country.tmp <- "China"
+china.perc.change <- 0.35
+china.prev1 <- dat.prev$`1st Prevalence`[dat.prev$Country==country.tmp]
+
+china.ann.rate <- getRateofChange(prev1=china.prev1,prev2=108,year1=2000,year2=2010)
+
+china.pop <- read.csv("Data/china-pop.csv")
+
+china.dat.4 <- getDuration2(country.tmp=country.tmp,pop.data=china.pop,unDxTBdur=4)
+names(china.dat.4) <- col.names
+
+china.dat.6 <- getDuration2(country.tmp=country.tmp,pop.data=china.pop,unDxTBdur=6)
+names(china.dat.6) <- col.names
+
+china.all <- dplyr::bind_rows(china.dat.4,china.dat,china.dat.6)
+
+china.all %>% kbl() %>% kable_styling()
+
+# create plot of results
+ggplot(china.all,aes(as.factor(`Year`),`Prevalence per 100k`,color=as.factor(`Assumed duration of untreated disease`))) + 
+  geom_point() +
+  theme_bw() +
+  xlab("Year") +
+  labs(color="Assumed duration of untreated disease") +
+  ggtitle(country.tmp) +
+  geom_point(aes(x=as.factor(2010),y=dat.prev$`2nd Survey Prevalence`[dat.prev$Country==country.tmp]),color="black",shape=3)
+```
+
+
+
+### Cambodia
+
+```{r, echo=FALSE}
+country.tmp <- "Cambodia"
+cam.perc.change <- 0.452
+cam.prev1 <- dat.prev$`1st Prevalence`[dat.prev$Country==country.tmp]
+y1 <- 2002
+y2 <- 2011
+
+cam.ann.rate <- getRateofChange(prev1=cam.prev1,prev2=817,year1=2002,year2=2010)
+
+cam.pop <- read.csv("Data/camb-pop.csv")
+
+cam.dat.4<- getDuration2(country.tmp=country.tmp,pop.data=cam.pop,unDxTBdur=4)
+names(cam.dat.4) <- col.names
+
+cam.dat.6 <- getDuration2(country.tmp=country.tmp,pop.data=cam.pop,unDxTBdur=6)
+names(cam.dat.6) <- col.names
+
+cam.all <- dplyr::bind_rows(cam.dat.4,cam.dat,cam.dat.6)
+
+cam.all %>% kbl() %>% kable_styling()
+
+# create plot of results
+ggplot(cam.all,aes(as.factor(`Year`),`Prevalence per 100k`,color=as.factor(`Assumed duration of untreated disease`))) + 
+  geom_point() +
+  theme_bw() +
+  xlab("Year") +
+  labs(color="Assumed duration of untreated disease") +
+  ggtitle(country.tmp) +
+  geom_point(aes(x=as.factor(2011),y=dat.prev$`2nd Survey Prevalence`[dat.prev$Country==country.tmp]),color="black",shape=3)
+
+
+```
+ 
+
+### Myanmar
+
+```{r, echo=FALSE}
+country.tmp <- "Myanmar"
+mya.perc.change <- 0.51
+mya.prev1 <- dat.prev$`1st Prevalence`[dat.prev$Country==country.tmp]
+
+mya.ann.rate <- getRateofChange(prev1=mya.prev1,prev2=415,year1=2009,year2=2017)
+
+mya.pop <- read.csv("Data/myanmar-pop.csv")
+
+mya.dat.4 <- getDuration2(country.tmp=country.tmp,pop.data=mya.pop,unDxTBdur=4)
+names(mya.dat.4) <- col.names
+
+mya.dat.6 <- getDuration2(country.tmp=country.tmp,pop.data=mya.pop,unDxTBdur=6)
+names(mya.dat.6) <- col.names
+
+mya.all <- dplyr::bind_rows(mya.dat.4,mya.dat,mya.dat.6)
+
+mya.all %>% kbl() %>% kable_styling()
+
+# create plot of results
+ggplot(mya.all,aes(as.factor(`Year`),`Prevalence per 100k`,color=as.factor(`Assumed duration of untreated disease`))) + 
+  geom_point() +
+  theme_bw() +
+  xlab("Year") +
+  labs(color="Assumed duration of untreated disease") +
+  ggtitle(country.tmp) +
+  geom_point(aes(x=as.factor(2018),y=dat.prev$`2nd Survey Prevalence`[dat.prev$Country==country.tmp]),color="black",shape=3)
+
+
+```
+
+Finally we can assess what assumed duration of untreated disease allows us to get closest to the second prevalence survey estimate.
+
+```{r, echo=F}
+real.dat <- dat.prev %>% select(Country,`2nd Survey Prevalence`,`Second prevalence survey year`)
+
+all.results <- dplyr::bind_rows(mya.all,china.all,cam.all,phil.all,viet.all,indo.all)
+
+all.results.2 <- left_join(all.results,real.dat)
+
+# has only the second prevalence survey results for each assumed duration
+all.results.3 <- all.results.2 %>% filter(Year==`Second prevalence survey year`)
+
+# now calculate the difference between the actual prevalence and estimated from the model
+all.results.3$prev.diff <- abs(all.results.3$`2nd Survey Prevalence`-all.results.3$`Prevalence per 100k`)
+
+# create nice table with the results we want
+test <- spread(all.results.3[,c(1:2,9,12,14)], key = `Assumed duration of untreated disease`, value = `prev.diff`)
+names(test) <- c(col.names[1:2],"2nd Survey Prevalence","Prev difference, d=4","Prev difference, d=5","Prev difference, d=6")
+test2 <- spread(all.results.3[,c(1:2,6,9,12)], key = `Assumed duration of untreated disease`, value = `Duration of treated disease`)
+names(test2) <- c(col.names[1:2],"2nd Survey Prevalence","Duration, d=4","Duration, d=5","Duration, d=6")
+test3 <- spread(all.results.3[,c(1:2,7,9,12)], key = `Assumed duration of untreated disease`, value = `Prevalence per 100k`)
+names(test3) <- c(col.names[1:2],"2nd Survey Prevalence","Prevalence, d=4","Prevalence, d=5","Prevalence, d=6")
+
+summary.res.tmp <- left_join(test,test2)
+summary.res <- left_join(summary.res.tmp,test3)
+
+summary.res %>% kbl() %>% kable_styling()
+```

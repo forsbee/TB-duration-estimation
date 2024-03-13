@@ -1,0 +1,233 @@
+---
+title: "WHO data"
+author: "Laura F White"
+date: "2023-10-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, include=FALSE}
+source("utils.R")
+library(readxl)
+library(ggplot2)
+library(reshape)
+library(reshape2)
+library(RColorBrewer)
+library(ggpubr)
+library(gridExtra)
+library(grid)
+library(scales)
+library(dplyr)
+library(data.table)
+library(xlsx)
+library(kableExtra)
+```
+
+## Summary of country-level WHO data
+
+### Notifications
+We first plot notification by year.
+
+```{r,include=T,echo=F}
+dat.who <- read.csv("data/WHO-data.csv")
+
+plot.not <- ggplot(dat.who, aes(x=Year,y=Notifications,color=Country))+
+  geom_point() + geom_line() +
+  labs(title="Notifications") + ylab("Notifications") +
+  xlim(min(dat.who$Year),max(dat.who$Year))+
+  ylim(min(dat.who$Notifications),max(dat.who$Notifications))
+
+plot.not
+
+# do population adjusted notification data (per 100k)
+## first read in population data files to add to notifications
+#### data downloaded on 10/25/23 from datacommons.org (world bank population estimates)
+china.pop <- read.csv("data/china-pop.csv"); china.pop$Country <- "China"
+camb.pop <- read.csv("data/camb-pop.csv"); camb.pop$Country <- "Cambodia"
+indo.pop <- read.csv("data/indo-pop.csv"); indo.pop$Country <- "Indonesia"
+bang.pop <- read.csv("data/bang-pop.csv"); bang.pop$Country <- "Bangladesh"
+myan.pop <- read.csv("data/myanmar-pop.csv"); myan.pop$Country <- "Myanmar"
+phil.pop <- read.csv("data/phil-pop.csv"); phil.pop$Country <- "Philippines"
+viet.pop <- read.csv("data/vietnam-pop.csv"); viet.pop$Country <- "Viet Nam"
+
+## dataset with all mortality data
+dat.pop <- rbind(china.pop,camb.pop,indo.pop,bang.pop,myan.pop,phil.pop,viet.pop)
+
+## get max and min years for each country
+years <- dat.who %>%
+  group_by(Country) %>%
+  summarise(min.year = min(Year, na.rm = TRUE), max.year = max(Year, na.rm = TRUE)) 
+names(years) <- c("Country","min.year","max.year")
+
+## filter to data that is for the years of the prevalence surveys
+dat.pop2 <- merge(dat.pop,years)
+
+dat.pop3 <- dat.pop2 %>% 
+  group_by(Country) %>%
+  filter(label <= max.year & label >= min.year)
+
+names(dat.pop3) <- c("Country","Year","Total.Population","min.year","max.year")
+
+dat.who2 <- merge(dat.who,dat.pop3)
+
+# now calculate population adjusted notifications per 100k
+dat.who2$not.pop <- 100000*(dat.who2$Notifications/dat.who2$Total.Population)
+
+dat.who2 <- dat.who2[!is.na(dat.who2$Cure.Prop),]
+
+# plot the population adjusted notifications
+plot.not.pop <- ggplot(dat.who2, aes(x=Year,y=not.pop,color=Country))+
+  geom_point() + geom_line() +
+  labs(title="Population-adjusted Notifications") + ylab("Notifications (per 100k)") +
+  xlim(min(dat.who2$Year),max(dat.who2$Year))+
+  ylim(min(dat.who2$not.pop),max(dat.who2$not.pop))
+
+plot.not.pop
+
+# plot the population sizes over the time period
+plot.pop <- ggplot(dat.who2, aes(x=Year,y=Total.Population,color=Country))+
+  geom_point() + geom_line() +
+  labs(title="Population Size") + ylab("Population Size") 
+
+plot.pop
+
+# plot without China
+plot.pop2 <- ggplot(dat.who2[dat.who2$Country!="China",], aes(x=Year,y=Total.Population,color=Country))+
+  geom_point() + geom_line() +
+  labs(title="Population Size") + ylab("Population Size") 
+
+plot.pop2
+
+
+```
+
+### Cure proportion
+
+Next we plot the proportion treated by year.
+
+```{r,include=T,echo=F}
+plot.cure <- ggplot(dat.who2, aes(x=Year,y=Cure.Prop,color=Country))+
+  geom_point() + geom_line() + ylab("Proportion Treated")
+
+plot.cure
+```
+
+### Notifications versus Cure Rates
+
+We can consider the number of notifications compared to the proportion treated.
+
+```{r,include=T,echo=F}
+plot.not.cure <- ggplot(dat.who2, aes(x=Notifications,y=Cure.Prop,color=Country))+
+  geom_point() + geom_line() + ylab("Proportion Treated") 
+
+plot.not.cure
+```
+
+```{r,include=T,echo=F}
+plot.not.cure <- ggplot(dat.who2, aes(x=not.pop,y=Cure.Prop,color=Country))+
+  geom_point() + geom_line() + ylab("Proportion Treated") + xlab("Notification rate (per 100k)")
+
+plot.not.cure
+```
+
+### Mortality data
+
+We now summarize WHO data on the deaths due to TB among HIV-negative people.
+
+```{r, include=F,echo=F}
+death.data <- read.csv("data/WHO-TB-mortality.csv")
+
+names(years) <- c("Location","min.year","max.year")
+
+death.data2 <- merge(death.data,years)
+
+death.data3 <- death.data2 %>% 
+  group_by(Location) %>%
+  filter(Period <= max.year & Period >= min.year)
+
+death.data4 <- death.data3 %>% select(Location,Period,FactValueNumeric,FactValueNumericLow,FactValueNumericHigh)
+names(death.data4) <- c("Country","Year","Death.rate","Death.rate.lcl","Death.rate.ucl")
+
+plot.deaths <- ggplot(death.data4, aes(x=Year,y=Death.rate,color=Country))+
+  geom_point() + geom_line() + ylab("TB Deaths among those without HIV") +
+  xlim(min(death.data4$Year),max(death.data4$Year))+
+  ylim(min(death.data4$Death.rate),max(death.data4$Death.rate))
+
+plot.deaths
+
+```
+
+### Calculate the rate of change in notifications compared to rate of change in prevalence surveys
+
+```{r,echo=F}
+# Approach 1: calculate rate in the same way as with prevalence surveys (just use first and last notification)
+dat.small <- dat.who2 %>% 
+  group_by(Country) %>%
+  filter(Year==min.year | Year==max.year) 
+
+rate1 <- dat.small %>%
+  group_by(Country) %>%
+  reframe(r1=getRateofChange(Notifications[Year==min.year],Notifications[Year==max.year],min.year,max.year))
+rate1 <- distinct(rate1)
+
+# Approach 2: use population-adjusted notification data
+rate2 <- dat.small %>%
+  group_by(Country) %>%
+  reframe(r2=getRateofChange(not.pop[Year==min.year],not.pop[Year==max.year],min.year,max.year))
+rate2 <- distinct(rate2)
+
+# Approach 3: calculate the change from the last two years
+dat.small2 <- dat.who2 %>%
+  group_by(Country) %>%
+  filter(Year==max.year | Year==max.year-1)
+  
+rate3 <- dat.small2 %>%
+  group_by(Country) %>%
+  reframe(r3=Notifications[Year==max.year]/Notifications[Year==max.year-1])
+
+# Approach 4: use population adjusted notifications from last two years
+rate4 <- dat.small2 %>%
+  group_by(Country) %>%
+  reframe(r4=not.pop[Year==max.year]/not.pop[Year==max.year-1])
+
+# Approach 5: average the annual changes
+dat.who3 <- dat.who2 %>% arrange(Country,Year)
+
+tmp <- dat.who3 %>%
+  group_by(Country) %>%
+  mutate(tmp.rates=Notifications/lead(Notifications))
+
+rate5 <- tmp %>%
+  group_by(Country) %>%
+  summarize(r5=mean(tmp.rates,na.rm=T))
+
+# Approach 6: average the annual changes, population adjusted notifications
+tmp <- dat.who3 %>%
+  group_by(Country) %>%
+  mutate(tmp.rates=not.pop/lead(not.pop))
+
+rate6 <- tmp %>%
+  group_by(Country) %>%
+  summarize(r6=mean(tmp.rates,na.rm=T))
+
+# get rates we used in original analysis from prevalence surveys
+rate.prev <- data.frame(Country=unique(dat.who3$Country),rate.prev=c(1.05,0.93,0.96,1.04,0.91,0.99,0.96))
+
+rates <- rate1 %>% left_join(rate2) %>%
+  left_join(rate3) %>% left_join(rate4) %>%
+  left_join(rate5) %>% left_join(rate6) %>%
+  left_join(rate.prev)
+
+names(rates) <- c("Country","First/last Notification","First/last Notification (per 100k)",
+                  "Last two years","Last two years (per 100k)",
+                  "Average annual change","Average Annual change (per 100k)",
+                  "Prevalence Survey estimate")
+
+rates %>% kbl() %>% kable_styling()
+```
+
+To do:
+do we need to adjust the rate of change if the cure rate is changing over the time period? i.e. this might indicate that our assumption of stable rate of change in prevalence is not quite right

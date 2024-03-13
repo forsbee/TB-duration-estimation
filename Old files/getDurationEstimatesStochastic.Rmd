@@ -1,0 +1,625 @@
+---
+title: "Duration Calculations"
+author: "Laura F White"
+date: "2024-1-10"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,warning = FALSE, message = FALSE)
+```
+
+```{r, include=FALSE}
+source("utils.R")
+library(readxl)
+library(ggplot2)
+library(reshape)
+library(reshape2)
+library(RColorBrewer)
+library(ggpubr)
+library(gridExtra)
+library(grid)
+library(scales)
+library(dplyr)
+library(data.table)
+library(xlsx)
+library(kableExtra)
+library(tidyr)
+```
+
+```{r,include=F}
+# read in data
+
+# prevalence survey estimates, with years and CIs
+dat.prev <- read_excel("Data/PrevalenceSurveyData.xlsx",sheet="Sheet1")
+
+# data on treatments 
+dat.cure <- read_excel("Data/AnnualTreatments.xlsx",sheet="Sheet1")
+
+```
+
+## Methods
+
+### Estimation of the duration of disease
+We leverage countries with two prevalence surveys to determine duration and incidence of TB each year between the two prevalence surveys. To do this, we also use data on cures and deaths from TB. We assume that the ratio of prevalence to incidence is not changing over the studied time period (which implies that disease duration is also not changing). As a first, most simple approach to this problem, we determine what the ratio of prevalence to incidence must be to get us to the value of the second prevalence survey. We calculate prevalence in year $t$, $P_t$ as a function of the prior year's prevalence, number treated, number who died and the incidence in the prior year, as follows: $P_t=P_{t-1}-C_{t-1}-D_{t-1}+I_{t-1}$, where $C_t$ and $D_t$ are the number of treated (or cured) cases of TB in year $t$ and $D_t$ are the number of deaths or self cures from TB in year $t$. We assume that the number who die or self cure have an average duration of 5 years and estimate the size of this population to be $D_t=(1/\delta_u)*(P_t-C_t)$, where $\delta_u$ is the duration of untreated disease. 
+
+We observe prevalence at two time points and have annual treatment and mortality data.
+
+We provide more detail on the estimates of prevalence for each country below. We couple prevalence per 100,000 individuals with the population level estimates when the prevalence surveys were conducted to get the total number of prevalent TB cases, which we use in our calculation. 
+
+We loop through a range of duration estimates from 1 to 6 years by 0.01 increments (meaning we consider 501 duration values) and select the duration that generates a second prevalence estimate that is closest to the observed second prevalence survey estimate.
+
+To incorporate the uncertainty in the prevalence survey estimates, we use the confidence intervals for each prevalence survey estimate and assume normality to get a standard deviation. We then generate 10000 potential first prevalence survey values with this normal distribution. For each of these 10000 values, we estimate annual prevalence until the year of the second prevalence survey using the range of duration estimates. This means that for each simulated prevalence we have 501 second prevalence estimates. We use the normal distribution we fit for the second prevlance to assign a weight to each of these estimated second prevalence using the normal distribution probability density function. For each of the 10000 simulations, we select the duration estimate with the largest PDF value. We then use these 10000 values to get the estimated duration and the empirical 95% confidence intervals. 
+
+## Country specific Estimates
+
+### Vietnam
+
+```{r, echo=FALSE}
+country.tmp <- "Vietnam"
+viet.ann.rate <- 1-0.045
+tmp.pop <- read.csv("Data/vietnam-pop.csv")
+
+col.names <- c("Country","Year","Prevalence","Prevalence LCL","Prevalence UCL","Treated","Incidence","Duration of treated disease",
+               "Prevalence per 100k","Prevalence per 100k LCL","Prevalence per 100k UCL","Incidence per 100k",
+               "Assumed duration of untreated disease","Proportion of prevalence cases treated","Proportion of incident cases treated")
+
+# Do sensitivity analysis to get results for untreated TB varying from 3 to 7 years
+tmp <- getDurationPDF(country=country.tmp,pop.data=tmp.pop,duration.range=seq(1,6,0.01),unDxTBdur=3,M=10000)
+tmp.all.res <- tmp$all.results
+tmp.CIs <- tmp$CIs
+
+for(j in 4:7){
+  tmp.dat <- getDurationPDF(country=country.tmp,pop.data=tmp.pop,duration.range=seq(1,6,0.01),unDxTBdur=j,M=10000)
+  
+  tmp.all.res <- dplyr::bind_rows(tmp.all.res,tmp.dat$all.results)
+  tmp.CIs <- dplyr::bind_rows(tmp.CIs,tmp.dat$CIs)
+}
+
+names(tmp.all.res) <- col.names
+
+
+##### plot prevalences by year separately for each untreated disease duration assumption #####
+ggplot(tmp.all.res,aes(as.factor(`Year`),`Prevalence per 100k`,group=as.factor(`Assumed duration of untreated disease`))) + 
+  geom_point(aes(color=as.factor(`Assumed duration of untreated disease`))) + 
+  geom_line(aes(color=as.factor(`Assumed duration of untreated disease`))) +
+  theme_bw() +
+  xlab("Year") +
+  labs(color="Assumed duration \nof untreated disease") +
+  ggtitle(country.tmp)+
+  geom_point(aes(x=as.factor(max(`Year`)),y=dat.prev$`2nd Survey Prevalence`[dat.prev$Country==country.tmp]),color="black",shape=3)
+
+prev2 <- dat.prev$`2nd Survey Prevalence`[dat.prev$Country==country.tmp]
+prev2.lcl <- dat.prev$`lower CI prev2`[dat.prev$Country==country.tmp]
+prev2.ucl <- dat.prev$`upper CI prev2`[dat.prev$Country==country.tmp]
+```
+
+Following is a plot of the estimated annual prevalence assuming untreated TB has a duration of 5 years, with accompanying error bounds that account for uncertainty in the first and second prevalence survey estimates. The triangles show the proportion of prevalent disease that was treated annually.
+
+
+```{r, echo=FALSE}
+##### plot results with CI bands for duration=5 and overlay treatment rates #####
+##  get treatment rates on the same scale as incidence
+plot.max <- max(tmp.all.res$`Prevalence per 100k UCL`)
+tmp.all.res$trt.rescaled <- plot.max*(tmp.all.res$`Proportion of prevalence cases treated`)
+
+# shading for confidence bounds-I like this better
+ggplot(tmp.all.res[tmp.all.res$`Assumed duration of untreated disease`==5,],aes(as.factor(`Year`),`Prevalence per 100k`,group=1)) + 
+  geom_point() + 
+  geom_line() +
+  geom_ribbon(aes(ymin=`Prevalence per 100k LCL`,ymax=`Prevalence per 100k UCL`),alpha=0.3,fill="blue") +
+  theme_bw() +
+  xlab("Year") +
+  labs(color="Assumed duration \nof untreated disease") +
+  ggtitle(country.tmp) +
+  geom_point(aes(x=as.factor(max(tmp.all.res$`Year`)),y=dat.prev$`2nd Survey Prevalence`[dat.prev$Country==country.tmp]),color="black",shape=3) +
+  geom_point(aes(x=as.factor(`Year`),y=`trt.rescaled`),shape=24) +
+  scale_y_continuous(sec.axis=sec_axis(~. *(1/plot.max),name="Proportion of prevalent cases treated"))
+```
+
+Next we compare the accuracy of the second survey prevalence estimate from our model to the prevalence survey estimate for varying assumed duration of untreated disease. The second prevalence survey estimates is `r prev2` (`r prev2.lcl`,`r prev2.ucl`). The estimated duration of treated disease from our model and associated CIs are also shown.
+
+```{r, echo=FALSE}
+##### Table with duration ranging from 3-7 years showing duration estimates and difference between p_1 and p_2 #####
+## duration CIS: tmp.CIs
+durations <- unique(tmp.all.res$`Duration of treated disease`)
+prevs.2 <- tmp.all.res %>% filter(Year==max(Year)) %>% select(`Assumed duration of untreated disease`,`Prevalence per 100k`,`Prevalence per 100k LCL`,`Prevalence per 100k UCL`)
+prevs.2$prev.diff <- 100*(prevs.2$`Prevalence per 100k`-dat.prev$`2nd Survey Prevalence`[dat.prev$Country==country.tmp])/dat.prev$`2nd Survey Prevalence`[dat.prev$Country==country.tmp]
+
+results.dur.tmp <- dplyr::bind_cols(prevs.2,durations)
+results.dur <- dplyr::bind_cols(results.dur.tmp,tmp.CIs)
+
+results.dur[,2:8] <- round(results.dur[,2:8],digits=2)
+
+results.dur %>% kbl(col.names=c(names(prevs.2)[1],"Estimated 2nd survey Prevalence per 100k",names(prevs.2)[3:4],"Percent difference between estimated prevalence and actual","Duration treated disease","Duration LCL","Duration UCL")) %>% kable_styling()
+
+names(results.dur) <- c(names(prevs.2)[1],"Estimated 2nd survey Prevalence per 100k",names(prevs.2)[3:4],"Percent difference between estimated prevalence and actual","Duration treated disease","Duration LCL","Duration UCL")
+
+```
+
+Finally a table showing the full model outputs is shown.
+```{r, echo=FALSE}
+##### full results from all analyses #####
+tmp.all.res %>% kbl() %>% kable_styling()
+
+viet.all.res <- tmp.all.res
+viet.CIs <- tmp.CIs
+viet.results.dur <- results.dur
+```
+
+
+### Indonesia
+
+We run the model varying the assumed duration of untreated disease between 3 and 7 years. The following plot shows the estimated annual prevalences for the period of the two prevalence surveys. The plus sign in the final year shows the actual estimated prevalence from the prevalence survey.
+
+```{r, echo=FALSE}
+country.tmp <- "Indonesia"
+
+indo.ann.rate <- getRateofChange(prev1=120,prev2=180,year1=2004,year2=2013.5)
+
+tmp.pop <- read.csv("Data/indo-pop.csv")
+
+# Do sensitivity analysis to get results for untreated TB varying from 3 to 7 years
+tmp <- getDurationPDF(country=country.tmp,pop.data=tmp.pop,duration.range=seq(1,6,0.01),unDxTBdur=3,M=10000)
+tmp.all.res <- tmp$all.results
+tmp.CIs <- tmp$CIs
+
+for(j in 4:7){
+  tmp.dat <- getDurationPDF(country=country.tmp,pop.data=tmp.pop,duration.range=seq(1,6,0.01),unDxTBdur=j,M=10000)
+  
+  tmp.all.res <- dplyr::bind_rows(tmp.all.res,tmp.dat$all.results)
+  tmp.CIs <- dplyr::bind_rows(tmp.CIs,tmp.dat$CIs)
+}
+
+names(tmp.all.res) <- col.names
+
+
+##### plot prevalences by year separately for each untreated disease duration assumption #####
+ggplot(tmp.all.res,aes(as.factor(`Year`),`Prevalence per 100k`,group=as.factor(`Assumed duration of untreated disease`))) + 
+  geom_point(aes(color=as.factor(`Assumed duration of untreated disease`))) + 
+  geom_line(aes(color=as.factor(`Assumed duration of untreated disease`))) +
+  theme_bw() +
+  xlab("Year") +
+  labs(color="Assumed duration \nof untreated disease") +
+  ggtitle(country.tmp)+
+  geom_point(aes(x=as.factor(max(`Year`)),y=dat.prev$`2nd Survey Prevalence`[dat.prev$Country==country.tmp]),color="black",shape=3)
+
+prev2 <- dat.prev$`2nd Survey Prevalence`[dat.prev$Country==country.tmp]
+prev2.lcl <- dat.prev$`lower CI prev2`[dat.prev$Country==country.tmp]
+prev2.ucl <- dat.prev$`upper CI prev2`[dat.prev$Country==country.tmp]
+```
+
+Following is a plot of the estimated annual prevalence assuming untreated TB has a duration of 5 years, with accompanying error bounds that account for uncertainty in the first and second prevalence survey estimates. The triangles show the proportion of prevalent disease that was treated annually.
+
+
+```{r, echo=FALSE}
+##### plot results with CI bands for duration=5 and overlay treatment rates #####
+##  get treatment rates on the same scale as incidence
+plot.max <- max(tmp.all.res$`Prevalence per 100k UCL`)
+tmp.all.res$trt.rescaled <- plot.max*(tmp.all.res$`Proportion of prevalence cases treated`)
+
+# shading for confidence bounds-I like this better
+ggplot(tmp.all.res[tmp.all.res$`Assumed duration of untreated disease`==5,],aes(as.factor(`Year`),`Prevalence per 100k`,group=1)) + 
+  geom_point() + 
+  geom_line() +
+  geom_ribbon(aes(ymin=`Prevalence per 100k LCL`,ymax=`Prevalence per 100k UCL`),alpha=0.3,fill="blue") +
+  theme_bw() +
+  xlab("Year") +
+  labs(color="Assumed duration \nof untreated disease") +
+  ggtitle(country.tmp) +
+  geom_point(aes(x=as.factor(max(tmp.all.res$`Year`)),y=dat.prev$`2nd Survey Prevalence`[dat.prev$Country==country.tmp]),color="black",shape=3) +
+  geom_point(aes(x=as.factor(`Year`),y=`trt.rescaled`),shape=24) +
+  scale_y_continuous(sec.axis=sec_axis(~. *(1/plot.max),name="Proportion of prevalent cases treated"))
+```
+
+Next we compare the accuracy of the second survey prevalence estimate from our model to the prevalence survey estimate for varying assumed duration of untreated disease. The second prevalence survey estimates is `r prev2` (`r prev2.lcl`,`r prev2.ucl`). The estimated duration of treated disease from our model and associated CIs are also shown.
+
+```{r, echo=FALSE}
+##### Table with duration ranging from 3-7 years showing duration estimates and difference between p_1 and p_2 #####
+## duration CIS: tmp.CIs
+durations <- unique(tmp.all.res$`Duration of treated disease`)
+prevs.2 <- tmp.all.res %>% filter(Year==max(Year)) %>% select(`Assumed duration of untreated disease`,`Prevalence per 100k`,`Prevalence per 100k LCL`,`Prevalence per 100k UCL`)
+prevs.2$prev.diff <- 100*(prevs.2$`Prevalence per 100k`-dat.prev$`2nd Survey Prevalence`[dat.prev$Country==country.tmp])/dat.prev$`2nd Survey Prevalence`[dat.prev$Country==country.tmp]
+
+results.dur.tmp <- dplyr::bind_cols(prevs.2,durations)
+results.dur <- dplyr::bind_cols(results.dur.tmp,tmp.CIs)
+
+results.dur[,2:8] <- round(results.dur[,2:8],digits=2)
+
+results.dur %>% kbl(col.names=c(names(prevs.2)[1],"Estimated 2nd survey Prevalence per 100k",names(prevs.2)[3:4],"Percent difference between estimated prevalence and actual","Duration treated disease","Duration LCL","Duration UCL")) %>% kable_styling()
+
+names(results.dur) <- c(names(prevs.2)[1],"Estimated 2nd survey Prevalence per 100k",names(prevs.2)[3:4],"Percent difference between estimated prevalence and actual","Duration treated disease","Duration LCL","Duration UCL")
+
+```
+
+Finally a table showing the full model outputs is shown.
+```{r, echo=FALSE}
+##### full results from all analyses #####
+tmp.all.res %>% kbl() %>% kable_styling()
+
+indo.all.res <- tmp.all.res
+indo.CIs <- tmp.CIs
+indo.results.dur <- results.dur
+```
+
+
+### Philippines
+We run the model varying the assumed duration of untreated disease between 3 and 7 years. The following plot shows the estimated annual prevalences for the period of the two prevalence surveys. The plus sign in the final year shows the actual estimated prevalence from the prevalence survey.
+
+
+```{r, echo=FALSE}
+country.tmp <- "Philippines"
+rate.change.10y <- 0.105
+phil.prev1 <- dat.prev$`1st Prevalence`[dat.prev$Country==country.tmp] 
+phil.ann.rate <- getRateofChange(prev1=phil.prev1,prev2=982,year1=2007,year2=2016)
+
+tmp.pop <- read.csv("Data/phil-pop.csv")
+
+# Do sensitivity analysis to get results for untreated TB varying from 3 to 7 years
+tmp <- getDurationPDF(country=country.tmp,pop.data=tmp.pop,duration.range=seq(1,6,0.01),unDxTBdur=3,M=10000)
+tmp.all.res <- tmp$all.results
+tmp.CIs <- tmp$CIs
+
+for(j in 4:7){
+  tmp.dat <- getDurationPDF(country=country.tmp,pop.data=tmp.pop,duration.range=seq(1,6,0.01),unDxTBdur=j,M=10000)
+  
+  tmp.all.res <- dplyr::bind_rows(tmp.all.res,tmp.dat$all.results)
+  tmp.CIs <- dplyr::bind_rows(tmp.CIs,tmp.dat$CIs)
+}
+
+names(tmp.all.res) <- col.names
+
+
+##### plot prevalences by year separately for each untreated disease duration assumption #####
+ggplot(tmp.all.res,aes(as.factor(`Year`),`Prevalence per 100k`,group=as.factor(`Assumed duration of untreated disease`))) + 
+  geom_point(aes(color=as.factor(`Assumed duration of untreated disease`))) + 
+  geom_line(aes(color=as.factor(`Assumed duration of untreated disease`))) +
+  theme_bw() +
+  xlab("Year") +
+  labs(color="Assumed duration \nof untreated disease") +
+  ggtitle(country.tmp)+
+  geom_point(aes(x=as.factor(max(`Year`)),y=dat.prev$`2nd Survey Prevalence`[dat.prev$Country==country.tmp]),color="black",shape=3)
+prev2 <- dat.prev$`2nd Survey Prevalence`[dat.prev$Country==country.tmp]
+prev2.lcl <- dat.prev$`lower CI prev2`[dat.prev$Country==country.tmp]
+prev2.ucl <- dat.prev$`upper CI prev2`[dat.prev$Country==country.tmp]
+```
+
+Following is a plot of the estimated annual prevalence assuming untreated TB has a duration of 5 years, with accompanying error bounds that account for uncertainty in the first and second prevalence survey estimates. The triangles show the proportion of prevalent disease that was treated annually.
+
+
+```{r, echo=FALSE}
+##### plot results with CI bands for duration=5 and overlay treatment rates #####
+##  get treatment rates on the same scale as incidence
+plot.max <- max(tmp.all.res$`Prevalence per 100k UCL`)
+tmp.all.res$trt.rescaled <- plot.max*(tmp.all.res$`Proportion of prevalence cases treated`)
+
+# shading for confidence bounds-I like this better
+ggplot(tmp.all.res[tmp.all.res$`Assumed duration of untreated disease`==5,],aes(as.factor(`Year`),`Prevalence per 100k`,group=1)) + 
+  geom_point() + 
+  geom_line() +
+  geom_ribbon(aes(ymin=`Prevalence per 100k LCL`,ymax=`Prevalence per 100k UCL`),alpha=0.3,fill="blue") +
+  theme_bw() +
+  xlab("Year") +
+  labs(color="Assumed duration \nof untreated disease") +
+  ggtitle(country.tmp) +
+  geom_point(aes(x=as.factor(max(tmp.all.res$`Year`)),y=dat.prev$`2nd Survey Prevalence`[dat.prev$Country==country.tmp]),color="black",shape=3) +
+  geom_point(aes(x=as.factor(`Year`),y=`trt.rescaled`),shape=24) +
+  scale_y_continuous(sec.axis=sec_axis(~. *(1/plot.max),name="Proportion of prevalent cases treated"))
+```
+
+Next we compare the accuracy of the second survey prevalence estimate from our model to the prevalence survey estimate for varying assumed duration of untreated disease. The second prevalence survey estimates is `r prev2` (`r prev2.lcl`,`r prev2.ucl`). The estimated duration of treated disease from our model and associated CIs are also shown.
+
+```{r, echo=FALSE}
+##### Table with duration ranging from 3-7 years showing duration estimates and difference between p_1 and p_2 #####
+## duration CIS: tmp.CIs
+durations <- unique(tmp.all.res$`Duration of treated disease`)
+prevs.2 <- tmp.all.res %>% filter(Year==max(Year)) %>% select(`Assumed duration of untreated disease`,`Prevalence per 100k`,`Prevalence per 100k LCL`,`Prevalence per 100k UCL`)
+prevs.2$prev.diff <- 100*(prevs.2$`Prevalence per 100k`-dat.prev$`2nd Survey Prevalence`[dat.prev$Country==country.tmp])/dat.prev$`2nd Survey Prevalence`[dat.prev$Country==country.tmp]
+
+results.dur.tmp <- dplyr::bind_cols(prevs.2,durations)
+results.dur <- dplyr::bind_cols(results.dur.tmp,tmp.CIs)
+
+results.dur[,2:8] <- round(results.dur[,2:8],digits=2)
+
+results.dur %>% kbl(col.names=c(names(prevs.2)[1],"Estimated 2nd survey Prevalence per 100k",names(prevs.2)[3:4],"Percent difference between estimated prevalence and actual","Duration treated disease","Duration LCL","Duration UCL")) %>% kable_styling()
+
+names(results.dur) <- c(names(prevs.2)[1],"Estimated 2nd survey Prevalence per 100k",names(prevs.2)[3:4],"Percent difference between estimated prevalence and actual","Duration treated disease","Duration LCL","Duration UCL")
+
+```
+
+Finally a table showing the full model outputs is shown.
+```{r, echo=FALSE}
+##### full results from all analyses #####
+tmp.all.res %>% kbl() %>% kable_styling()
+
+phil.all.res <- tmp.all.res
+phil.CIs <- tmp.CIs
+phil.results.dur <- results.dur
+
+```
+
+
+### China
+
+```{r, echo=FALSE}
+country.tmp <- "China"
+china.perc.change <- 0.35
+china.prev1 <- dat.prev$`1st Prevalence`[dat.prev$Country==country.tmp]
+
+china.ann.rate <- getRateofChange(prev1=china.prev1,prev2=108,year1=2000,year2=2010)
+
+tmp.pop <- read.csv("Data/china-pop.csv")
+
+# Do sensitivity analysis to get results for untreated TB varying from 3 to 7 years
+tmp <- getDurationPDF(country=country.tmp,pop.data=tmp.pop,duration.range=seq(1,6,0.01),unDxTBdur=3,M=10000)
+tmp.all.res <- tmp$all.results
+tmp.CIs <- tmp$CIs
+
+for(j in 4:7){
+  tmp.dat <- getDurationPDF(country=country.tmp,pop.data=tmp.pop,duration.range=seq(1,6,0.01),unDxTBdur=j,M=10000)
+  
+  tmp.all.res <- dplyr::bind_rows(tmp.all.res,tmp.dat$all.results)
+  tmp.CIs <- dplyr::bind_rows(tmp.CIs,tmp.dat$CIs)
+}
+
+names(tmp.all.res) <- col.names
+
+##### plot prevalences by year separately for each untreated disease duration assumption #####
+ggplot(tmp.all.res,aes(as.factor(`Year`),`Prevalence per 100k`,group=as.factor(`Assumed duration of untreated disease`))) + 
+  geom_point(aes(color=as.factor(`Assumed duration of untreated disease`))) + 
+  geom_line(aes(color=as.factor(`Assumed duration of untreated disease`))) +
+  theme_bw() +
+  xlab("Year") +
+  labs(color="Assumed duration \nof untreated disease") +
+  ggtitle(country.tmp)+
+  geom_point(aes(x=as.factor(max(`Year`)),y=dat.prev$`2nd Survey Prevalence`[dat.prev$Country==country.tmp]),color="black",shape=3)
+prev2 <- dat.prev$`2nd Survey Prevalence`[dat.prev$Country==country.tmp]
+prev2.lcl <- dat.prev$`lower CI prev2`[dat.prev$Country==country.tmp]
+prev2.ucl <- dat.prev$`upper CI prev2`[dat.prev$Country==country.tmp]
+```
+
+Following is a plot of the estimated annual prevalence assuming untreated TB has a duration of 5 years, with accompanying error bounds that account for uncertainty in the first and second prevalence survey estimates. The triangles show the proportion of prevalent disease that was treated annually.
+
+
+```{r, echo=FALSE}
+##### plot results with CI bands for duration=5 and overlay treatment rates #####
+##  get treatment rates on the same scale as incidence
+plot.max <- max(tmp.all.res$`Prevalence per 100k UCL`)
+tmp.all.res$trt.rescaled <- plot.max*(tmp.all.res$`Proportion of prevalence cases treated`)
+
+# shading for confidence bounds-I like this better
+ggplot(tmp.all.res[tmp.all.res$`Assumed duration of untreated disease`==5,],aes(as.factor(`Year`),`Prevalence per 100k`,group=1)) + 
+  geom_point() + 
+  geom_line() +
+  geom_ribbon(aes(ymin=`Prevalence per 100k LCL`,ymax=`Prevalence per 100k UCL`),alpha=0.3,fill="blue") +
+  theme_bw() +
+  xlab("Year") +
+  labs(color="Assumed duration \nof untreated disease") +
+  ggtitle(country.tmp) +
+  geom_point(aes(x=as.factor(max(tmp.all.res$`Year`)),y=dat.prev$`2nd Survey Prevalence`[dat.prev$Country==country.tmp]),color="black",shape=3) +
+  geom_point(aes(x=as.factor(`Year`),y=`trt.rescaled`),shape=24) +
+  scale_y_continuous(sec.axis=sec_axis(~. *(1/plot.max),name="Proportion of prevalent cases treated"))
+```
+
+Next we compare the accuracy of the second survey prevalence estimate from our model to the prevalence survey estimate for varying assumed duration of untreated disease. The second prevalence survey estimates is `r prev2` (`r prev2.lcl`,`r prev2.ucl`). The estimated duration of treated disease from our model and associated CIs are also shown.
+
+```{r, echo=FALSE}
+##### Table with duration ranging from 3-7 years showing duration estimates and difference between p_1 and p_2 #####
+## duration CIS: tmp.CIs
+durations <- unique(tmp.all.res$`Duration of treated disease`)
+prevs.2 <- tmp.all.res %>% filter(Year==max(Year)) %>% select(`Assumed duration of untreated disease`,`Prevalence per 100k`,`Prevalence per 100k LCL`,`Prevalence per 100k UCL`)
+prevs.2$prev.diff <- 100*(prevs.2$`Prevalence per 100k`-dat.prev$`2nd Survey Prevalence`[dat.prev$Country==country.tmp])/dat.prev$`2nd Survey Prevalence`[dat.prev$Country==country.tmp]
+
+results.dur.tmp <- dplyr::bind_cols(prevs.2,durations)
+results.dur <- dplyr::bind_cols(results.dur.tmp,tmp.CIs)
+
+results.dur[,2:8] <- round(results.dur[,2:8],digits=2)
+
+results.dur %>% kbl(col.names=c(names(prevs.2)[1],"Estimated 2nd survey Prevalence per 100k",names(prevs.2)[3:4],"Percent difference between estimated prevalence and actual","Duration treated disease","Duration LCL","Duration UCL")) %>% kable_styling()
+
+names(results.dur) <- c(names(prevs.2)[1],"Estimated 2nd survey Prevalence per 100k",names(prevs.2)[3:4],"Percent difference between estimated prevalence and actual","Duration treated disease","Duration LCL","Duration UCL")
+
+```
+
+Finally a table showing the full model outputs is shown.
+```{r, echo=FALSE}
+##### full results from all analyses #####
+tmp.all.res %>% kbl() %>% kable_styling()
+
+china.all.res <- tmp.all.res
+china.CIs <- tmp.CIs
+china.results.dur <- results.dur
+```
+
+
+
+### Cambodia
+
+```{r, echo=FALSE}
+country.tmp <- "Cambodia"
+cam.perc.change <- 0.452
+cam.prev1 <- dat.prev$`1st Prevalence`[dat.prev$Country==country.tmp]
+
+cam.ann.rate <- getRateofChange(prev1=cam.prev1,prev2=817,year1=2002,year2=2010)
+
+tmp.pop <- read.csv("Data/camb-pop.csv")
+
+# Do sensitivity analysis to get results for untreated TB varying from 3 to 7 years
+tmp <- getDurationPDF(country=country.tmp,pop.data=tmp.pop,duration.range=seq(1,6,0.01),unDxTBdur=3,M=10000)
+tmp.all.res <- tmp$all.results
+tmp.CIs <- tmp$CIs
+
+for(j in 4:7){
+  tmp.dat <- getDurationPDF(country=country.tmp,pop.data=tmp.pop,duration.range=seq(1,6,0.01),unDxTBdur=j,M=10000)
+  
+  tmp.all.res <- dplyr::bind_rows(tmp.all.res,tmp.dat$all.results)
+  tmp.CIs <- dplyr::bind_rows(tmp.CIs,tmp.dat$CIs)
+}
+
+names(tmp.all.res) <- col.names
+
+##### plot prevalences by year separately for each untreated disease duration assumption #####
+ggplot(tmp.all.res,aes(as.factor(`Year`),`Prevalence per 100k`,group=as.factor(`Assumed duration of untreated disease`))) + 
+  geom_point(aes(color=as.factor(`Assumed duration of untreated disease`))) + 
+  geom_line(aes(color=as.factor(`Assumed duration of untreated disease`))) +
+  theme_bw() +
+  xlab("Year") +
+  labs(color="Assumed duration \nof untreated disease") +
+  ggtitle(country.tmp)+
+  geom_point(aes(x=as.factor(max(`Year`)),y=dat.prev$`2nd Survey Prevalence`[dat.prev$Country==country.tmp]),color="black",shape=3)
+prev2 <- dat.prev$`2nd Survey Prevalence`[dat.prev$Country==country.tmp]
+prev2.lcl <- dat.prev$`lower CI prev2`[dat.prev$Country==country.tmp]
+prev2.ucl <- dat.prev$`upper CI prev2`[dat.prev$Country==country.tmp]
+```
+
+Following is a plot of the estimated annual prevalence assuming untreated TB has a duration of 5 years, with accompanying error bounds that account for uncertainty in the first and second prevalence survey estimates. The triangles show the proportion of prevalent disease that was treated annually.
+
+
+```{r, echo=FALSE}
+##### plot results with CI bands for duration=5 and overlay treatment rates #####
+##  get treatment rates on the same scale as incidence
+plot.max <- max(tmp.all.res$`Prevalence per 100k UCL`)
+tmp.all.res$trt.rescaled <- plot.max*(tmp.all.res$`Proportion of prevalence cases treated`)
+
+# shading for confidence bounds-I like this better
+ggplot(tmp.all.res[tmp.all.res$`Assumed duration of untreated disease`==5,],aes(as.factor(`Year`),`Prevalence per 100k`,group=1)) + 
+  geom_point() + 
+  geom_line() +
+  geom_ribbon(aes(ymin=`Prevalence per 100k LCL`,ymax=`Prevalence per 100k UCL`),alpha=0.3,fill="blue") +
+  theme_bw() +
+  xlab("Year") +
+  labs(color="Assumed duration \nof untreated disease") +
+  ggtitle(country.tmp) +
+  geom_point(aes(x=as.factor(max(tmp.all.res$`Year`)),y=dat.prev$`2nd Survey Prevalence`[dat.prev$Country==country.tmp]),color="black",shape=3) +
+  geom_point(aes(x=as.factor(`Year`),y=`trt.rescaled`),shape=24) +
+  scale_y_continuous(sec.axis=sec_axis(~. *(1/plot.max),name="Proportion of prevalent cases treated"))
+```
+
+Next we compare the accuracy of the second survey prevalence estimate from our model to the prevalence survey estimate for varying assumed duration of untreated disease. The second prevalence survey estimates is `r prev2` (`r prev2.lcl`,`r prev2.ucl`). The estimated duration of treated disease from our model and associated CIs are also shown.
+
+```{r, echo=FALSE}
+##### Table with duration ranging from 3-7 years showing duration estimates and difference between p_1 and p_2 #####
+## duration CIS: tmp.CIs
+durations <- unique(tmp.all.res$`Duration of treated disease`)
+prevs.2 <- tmp.all.res %>% filter(Year==max(Year)) %>% select(`Assumed duration of untreated disease`,`Prevalence per 100k`,`Prevalence per 100k LCL`,`Prevalence per 100k UCL`)
+prevs.2$prev.diff <- 100*(prevs.2$`Prevalence per 100k`-dat.prev$`2nd Survey Prevalence`[dat.prev$Country==country.tmp])/dat.prev$`2nd Survey Prevalence`[dat.prev$Country==country.tmp]
+
+results.dur.tmp <- dplyr::bind_cols(prevs.2,durations)
+results.dur <- dplyr::bind_cols(results.dur.tmp,tmp.CIs)
+
+results.dur[,2:8] <- round(results.dur[,2:8],digits=2)
+
+results.dur %>% kbl(col.names=c(names(prevs.2)[1],"Estimated 2nd survey Prevalence per 100k",names(prevs.2)[3:4],"Percent difference between estimated prevalence and actual","Duration treated disease","Duration LCL","Duration UCL")) %>% kable_styling()
+
+names(results.dur) <- c(names(prevs.2)[1],"Estimated 2nd survey Prevalence per 100k",names(prevs.2)[3:4],"Percent difference between estimated prevalence and actual","Duration treated disease","Duration LCL","Duration UCL")
+
+```
+
+Finally a table showing the full model outputs is shown.
+```{r, echo=FALSE}
+##### full results from all analyses #####
+tmp.all.res %>% kbl() %>% kable_styling()
+
+cam.all.res <- tmp.all.res
+cam.CIs <- tmp.CIs
+cam.results.dur <- results.dur
+
+```
+ 
+
+### Myanmar
+
+```{r, echo=FALSE}
+country.tmp <- "Myanmar"
+mya.perc.change <- 0.51
+mya.prev1 <- dat.prev$`1st Prevalence`[dat.prev$Country==country.tmp]
+
+mya.ann.rate <- getRateofChange(prev1=mya.prev1,prev2=415,year1=2009,year2=2017)
+
+tmp.pop <- read.csv("Data/myanmar-pop.csv")
+
+# Do sensitivity analysis to get results for untreated TB varying from 3 to 7 years
+tmp <- getDurationPDF(country=country.tmp,pop.data=tmp.pop,duration.range=seq(1,6,0.01),unDxTBdur=3,M=10000)
+tmp.all.res <- tmp$all.results
+tmp.CIs <- tmp$CIs
+
+for(j in 4:7){
+  tmp.dat <- getDurationPDF(country=country.tmp,pop.data=tmp.pop,duration.range=seq(1,6,0.01),unDxTBdur=j,M=10000)
+  
+  tmp.all.res <- dplyr::bind_rows(tmp.all.res,tmp.dat$all.results)
+  tmp.CIs <- dplyr::bind_rows(tmp.CIs,tmp.dat$CIs)
+}
+
+names(tmp.all.res) <- col.names
+
+##### plot prevalences by year separately for each untreated disease duration assumption #####
+ggplot(tmp.all.res,aes(as.factor(`Year`),`Prevalence per 100k`,group=as.factor(`Assumed duration of untreated disease`))) + 
+  geom_point(aes(color=as.factor(`Assumed duration of untreated disease`))) + 
+  geom_line(aes(color=as.factor(`Assumed duration of untreated disease`))) +
+  theme_bw() +
+  xlab("Year") +
+  labs(color="Assumed duration \nof untreated disease") +
+  ggtitle(country.tmp)+
+  geom_point(aes(x=as.factor(max(`Year`)),y=dat.prev$`2nd Survey Prevalence`[dat.prev$Country==country.tmp]),color="black",shape=3)
+prev2 <- dat.prev$`2nd Survey Prevalence`[dat.prev$Country==country.tmp]
+prev2.lcl <- dat.prev$`lower CI prev2`[dat.prev$Country==country.tmp]
+prev2.ucl <- dat.prev$`upper CI prev2`[dat.prev$Country==country.tmp]
+```
+
+Following is a plot of the estimated annual prevalence assuming untreated TB has a duration of 5 years, with accompanying error bounds that account for uncertainty in the first and second prevalence survey estimates. The triangles show the proportion of prevalent disease that was treated annually.
+
+
+```{r, echo=FALSE}
+##### plot results with CI bands for duration=5 and overlay treatment rates #####
+##  get treatment rates on the same scale as incidence
+plot.max <- max(tmp.all.res$`Prevalence per 100k UCL`)
+tmp.all.res$trt.rescaled <- plot.max*(tmp.all.res$`Proportion of prevalence cases treated`)
+
+# shading for confidence bounds-I like this better
+ggplot(tmp.all.res[tmp.all.res$`Assumed duration of untreated disease`==5,],aes(as.factor(`Year`),`Prevalence per 100k`,group=1)) + 
+  geom_point() + 
+  geom_line() +
+  geom_ribbon(aes(ymin=`Prevalence per 100k LCL`,ymax=`Prevalence per 100k UCL`),alpha=0.3,fill="blue") +
+  theme_bw() +
+  xlab("Year") +
+  labs(color="Assumed duration \nof untreated disease") +
+  ggtitle(country.tmp) +
+  geom_point(aes(x=as.factor(max(tmp.all.res$`Year`)),y=dat.prev$`2nd Survey Prevalence`[dat.prev$Country==country.tmp]),color="black",shape=3) +
+  geom_point(aes(x=as.factor(`Year`),y=`trt.rescaled`),shape=24) +
+  scale_y_continuous(sec.axis=sec_axis(~. *(1/plot.max),name="Proportion of prevalent cases treated"))
+```
+
+Next we compare the accuracy of the second survey prevalence estimate from our model to the prevalence survey estimate for varying assumed duration of untreated disease. The second prevalence survey estimates is `r prev2` (`r prev2.lcl`,`r prev2.ucl`). The estimated duration of treated disease from our model and associated CIs are also shown.
+
+```{r, echo=FALSE}
+##### Table with duration ranging from 3-7 years showing duration estimates and difference between p_1 and p_2 #####
+## duration CIS: tmp.CIs
+durations <- unique(tmp.all.res$`Duration of treated disease`)
+prevs.2 <- tmp.all.res %>% filter(Year==max(Year)) %>% select(`Assumed duration of untreated disease`,`Prevalence per 100k`,`Prevalence per 100k LCL`,`Prevalence per 100k UCL`)
+prevs.2$prev.diff <- 100*(prevs.2$`Prevalence per 100k`-dat.prev$`2nd Survey Prevalence`[dat.prev$Country==country.tmp])/dat.prev$`2nd Survey Prevalence`[dat.prev$Country==country.tmp]
+
+results.dur.tmp <- dplyr::bind_cols(prevs.2,durations)
+results.dur <- dplyr::bind_cols(results.dur.tmp,tmp.CIs)
+
+results.dur[,2:8] <- round(results.dur[,2:8],digits=2)
+
+results.dur %>% kbl(col.names=c(names(prevs.2)[1],"Estimated 2nd survey Prevalence per 100k",names(prevs.2)[3:4],"Percent difference between estimated prevalence and actual","Duration treated disease","Duration LCL","Duration UCL")) %>% kable_styling()
+
+names(results.dur) <- c(names(prevs.2)[1],"Estimated 2nd survey Prevalence per 100k",names(prevs.2)[3:4],"Percent difference between estimated prevalence and actual","Duration treated disease","Duration LCL","Duration UCL")
+
+```
+
+Finally a table showing the full model outputs is shown.
+```{r, echo=FALSE}
+##### full results from all analyses #####
+tmp.all.res %>% kbl() %>% kable_styling()
+
+mya.all.res <- tmp.all.res
+mya.CIs <- tmp.CIs
+mya.results.dur <- results.dur
+
+save(viet.all.res,viet.CIs,viet.results.dur,indo.all.res,indo.CIs,indo.results.dur,phil.all.res,phil.CIs,phil.results.dur,china.all.res,china.CIs,china.results.dur,
+     cam.all.res,cam.CIs,cam.results.dur,mya.all.res,mya.CIs,mya.results.dur,file="Results/modelResults.RData")
+```
+
+

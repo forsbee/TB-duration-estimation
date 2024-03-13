@@ -1,0 +1,179 @@
+---
+title: "Model results"
+author: "Laura F White"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,warning = FALSE, message = FALSE)
+```
+
+```{r, include=FALSE}
+source("utils.R")
+library(readxl)
+library(ggplot2)
+library(reshape)
+library(reshape2)
+library(RColorBrewer)
+library(ggpubr)
+library(gridExtra)
+library(grid)
+library(scales)
+library(dplyr)
+library(data.table)
+library(xlsx)
+library(kableExtra)
+library(tidyr)
+library(grid)   # for the textGrob() function
+```
+
+# Figure with annual prevalence estimates
+
+Figure is for case when prevalence of untreated disease is assumed to be five years.
+
+```{r, echo=F}
+# read in data
+
+# prevalence survey estimates, with years and CIs
+dat.prev <- read_excel("Data/PrevalenceSurveyData.xlsx",sheet="Sheet1")
+
+# data on treatments 
+dat.cure <- read_excel("Data/AnnualTreatments.xlsx",sheet="Sheet1")
+
+load("Results/modelResults.RData")
+
+#### combine all the results together
+# Vietnam
+plot.max.v <- max(viet.all.res$`Prevalence per 100k UCL`)
+viet.all.res$trt.rescaled <- plot.max.v*(viet.all.res$`Proportion of prevalence cases treated`)
+
+# shading for confidence bounds-I like this better
+viet.plot <- ggplot(viet.all.res[viet.all.res$`Assumed duration of untreated disease`==5,],aes(as.factor(`Year`),`Prevalence per 100k`,group=1)) +
+  scale_x_discrete(breaks = levels(as.factor(viet.all.res$Year))[c(rep(c(T,F,F),3),T,F)]) + 
+  geom_point() + 
+  geom_line() +
+  geom_ribbon(aes(ymin=`Prevalence per 100k LCL`,ymax=`Prevalence per 100k UCL`),alpha=0.3,fill="blue") +
+  theme_bw() +
+  xlab("Year") +
+  ggtitle("Vietnam") +
+  geom_point(aes(x=as.factor(max(viet.all.res$`Year`)),y=dat.prev$`2nd Survey Prevalence`[dat.prev$Country=="Vietnam"]),color="black",shape=3) +
+  geom_point(aes(x=as.factor(`Year`),y=`trt.rescaled`),shape=24) +
+  scale_y_continuous(sec.axis=sec_axis(~. *(1/plot.max.v),name="Proportion of \nprevalent cases treatedd"))
+
+# Indonesia
+plot.max.i <- max(indo.all.res$`Prevalence per 100k UCL`)
+indo.all.res$trt.rescaled <- plot.max.i*(indo.all.res$`Proportion of prevalence cases treated`)
+
+# shading for confidence bounds-I like this better
+indo.plot <- ggplot(indo.all.res[indo.all.res$`Assumed duration of untreated disease`==5,],aes(as.factor(`Year`),`Prevalence per 100k`,group=1)) +
+  scale_x_discrete(breaks = levels(as.factor(indo.all.res$Year))[c(rep(c(T,F,F),3),T,F)]) + 
+  geom_point() + 
+  geom_line() +
+  geom_ribbon(aes(ymin=`Prevalence per 100k LCL`,ymax=`Prevalence per 100k UCL`),alpha=0.3,fill="blue") +
+  theme_bw() +
+  xlab("Year") +
+  ggtitle("Indonesia") +
+  geom_point(aes(x=as.factor(max(indo.all.res$`Year`)),y=dat.prev$`2nd Survey Prevalence`[dat.prev$Country=="Indonesia"]),color="black",shape=3) +
+  geom_point(aes(x=as.factor(`Year`),y=`trt.rescaled`),shape=24) +
+  scale_y_continuous(sec.axis=sec_axis(~. *(1/plot.max.i),name="Proportion of \nprevalent cases treated"))
+
+# Philippines
+plot.max.p <- max(phil.all.res$`Prevalence per 100k UCL`)
+phil.all.res$trt.rescaled <- plot.max.p*(phil.all.res$`Proportion of prevalence cases treated`)
+
+# shading for confidence bounds-I like this better
+phil.plot <- ggplot(phil.all.res[phil.all.res$`Assumed duration of untreated disease`==5,],aes(as.factor(`Year`),`Prevalence per 100k`,group=1)) +
+  scale_x_discrete(breaks = levels(as.factor(phil.all.res$Year))[c(rep(c(T,F,F),3),T)])+ 
+  geom_point() + 
+  geom_line() +
+  geom_ribbon(aes(ymin=`Prevalence per 100k LCL`,ymax=`Prevalence per 100k UCL`),alpha=0.3,fill="blue") +
+  theme_bw() +
+  xlab("Year") +
+  ggtitle("Philippines") +
+  geom_point(aes(x=as.factor(max(indo.all.res$`Year`)),y=dat.prev$`2nd Survey Prevalence`[dat.prev$Country=="Philippines"]),color="black",shape=3) +
+  geom_point(aes(x=as.factor(`Year`),y=`trt.rescaled`),shape=24) +
+  scale_y_continuous(sec.axis=sec_axis(~. *(1/plot.max.p),name=""))
+
+# China
+plot.max.c <- max(china.all.res$`Prevalence per 100k UCL`)
+china.all.res$trt.rescaled <- plot.max.c*(china.all.res$`Proportion of prevalence cases treated`)
+
+# shading for confidence bounds-I like this better
+china.plot <- ggplot(china.all.res[china.all.res$`Assumed duration of untreated disease`==5,],aes(as.factor(`Year`),`Prevalence per 100k`,group=1)) +
+  scale_x_discrete(breaks = levels(as.factor(china.all.res$Year))[c(rep(c(T,F,F),3),T,F)])+ 
+  geom_point() + 
+  geom_line() +
+  geom_ribbon(aes(ymin=`Prevalence per 100k LCL`,ymax=`Prevalence per 100k UCL`),alpha=0.3,fill="blue") +
+  theme_bw() +
+  xlab("Year") +
+  ggtitle("China") +
+  geom_point(aes(x=as.factor(max(china.all.res$`Year`)),y=dat.prev$`2nd Survey Prevalence`[dat.prev$Country=="China"]),color="black",shape=3) +
+  geom_point(aes(x=as.factor(`Year`),y=`trt.rescaled`),shape=24) +
+  scale_y_continuous(sec.axis=sec_axis(~. *(1/plot.max.c),name=""))
+
+# Cambodia
+plot.max.ca <- max(cam.all.res$`Prevalence per 100k UCL`)
+cam.all.res$trt.rescaled <- plot.max.ca*(cam.all.res$`Proportion of prevalence cases treated`)
+
+# shading for confidence bounds-I like this better
+cam.plot <- ggplot(cam.all.res[cam.all.res$`Assumed duration of untreated disease`==5,],aes(as.factor(`Year`),`Prevalence per 100k`,group=1)) +
+  scale_x_discrete(breaks = levels(as.factor(cam.all.res$Year))[c(rep(c(T,F,F),3),T)]) + 
+  geom_point() + 
+  geom_line() +
+  geom_ribbon(aes(ymin=`Prevalence per 100k LCL`,ymax=`Prevalence per 100k UCL`),alpha=0.3,fill="blue") +
+  theme_bw() +
+  xlab("Year") +
+  ggtitle("Cambodia") +
+  geom_point(aes(x=as.factor(max(cam.all.res$`Year`)),y=dat.prev$`2nd Survey Prevalence`[dat.prev$Country=="Cambodia"]),color="black",shape=3) +
+  geom_point(aes(x=as.factor(`Year`),y=`trt.rescaled`),shape=24) +
+  scale_y_continuous(sec.axis=sec_axis(~. *(1/plot.max.ca),name=""))
+
+# Myanmar
+plot.max.m <- max(mya.all.res$`Prevalence per 100k UCL`)
+mya.all.res$trt.rescaled <- plot.max.m*(mya.all.res$`Proportion of prevalence cases treated`)
+
+# shading for confidence bounds-I like this better
+mya.plot <- ggplot(mya.all.res[mya.all.res$`Assumed duration of untreated disease`==5,],aes(as.factor(`Year`),`Prevalence per 100k`,group=1)) +
+  scale_x_discrete(breaks = levels(as.factor(mya.all.res$Year))[c(rep(c(T,F,F),3),T)]) + 
+  geom_point() + 
+  geom_line() +
+  geom_ribbon(aes(ymin=`Prevalence per 100k LCL`,ymax=`Prevalence per 100k UCL`),alpha=0.3,fill="blue") +
+  theme_bw() +
+  xlab("Year") +
+  ggtitle("Myanmar") +
+  geom_point(aes(x=as.factor(max(mya.all.res$`Year`)),y=dat.prev$`2nd Survey Prevalence`[dat.prev$Country=="Myanmar"]),color="black",shape=3) +
+  geom_point(aes(x=as.factor(`Year`),y=`trt.rescaled`),shape=24) +
+  scale_y_continuous(sec.axis=sec_axis(~. *(1/plot.max.m),name="Proportion of \nprevalent cases treated"))
+
+all.figs <- ggarrange(china.plot + rremove("ylab") + rremove("xlab"),mya.plot + rremove("ylab") + rremove("xlab"),
+                      cam.plot + rremove("ylab") + rremove("xlab"),viet.plot + rremove("ylab") + rremove("xlab"),
+                      phil.plot + rremove("ylab") + rremove("xlab"),indo.plot + rremove("ylab") + rremove("xlab"),
+          ncol=2,nrow=3,align = "hv")
+
+annotate_figure(all.figs, left = textGrob("Prevalence per 100k", rot = 90, vjust = 1, gp = gpar(cex = 1.3)),
+                    bottom = textGrob("Year", gp = gpar(cex = 1.3)),
+                right = textGrob("Proportion of prevalent cases treated", rot = 90, vjust = 0.5, gp = gpar(cex = 1.3)))
+```
+
+
+# Table with all the estimated durations
+This assumes that the duration of untreated disease is 5 years.
+
+```{r, echo=F}
+viet.res <- bind_cols(viet.all.res %>% filter(`Assumed duration of untreated disease`==5) %>% select(`Country`,`Duration of treated disease`) %>% distinct(),viet.CIs[3,]) 
+indo.res <- bind_cols(indo.all.res %>% filter(`Assumed duration of untreated disease`==5) %>% select(`Country`,`Duration of treated disease`) %>% distinct(),indo.CIs[3,]) 
+phil.res <- bind_cols(phil.all.res %>% filter(`Assumed duration of untreated disease`==5) %>% select(`Country`,`Duration of treated disease`) %>% distinct(),phil.CIs[3,]) 
+china.res <- bind_cols(china.all.res %>% filter(`Assumed duration of untreated disease`==5) %>% select(`Country`,`Duration of treated disease`) %>% distinct(),china.CIs[3,]) 
+cam.res <- bind_cols(cam.all.res %>% filter(`Assumed duration of untreated disease`==5) %>% select(`Country`,`Duration of treated disease`) %>% distinct(),cam.CIs[3,]) 
+mya.res <- bind_cols(mya.all.res %>% filter(`Assumed duration of untreated disease`==5) %>% select(`Country`,`Duration of treated disease`) %>% distinct(),mya.CIs[3,]) 
+
+all.res <- bind_rows(china.res,mya.res,cam.res,viet.res,phil.res,indo.res)
+all.res[,2:4] <- round(all.res[,2:4],digits=2)
+
+all.res %>% kbl() %>% kable_styling()
+
+```
+
+
