@@ -1,0 +1,517 @@
+---
+title: "Duration Calculations"
+author: "Laura F White"
+date: "2024-2-7"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,warning = FALSE, message = FALSE)
+```
+
+```{r, include=FALSE}
+source("utils.R")
+library(readxl)
+library(ggplot2)
+library(reshape)
+library(reshape2)
+library(RColorBrewer)
+library(ggpubr)
+library(gridExtra)
+library(grid)
+library(scales)
+library(dplyr)
+library(data.table)
+library(kableExtra)
+library(tidyr)
+library(tidyverse)
+library(broom)
+```
+
+```{r,include=F}
+# parameters used in the simulation
+M <- 100000
+M2 <- 10000
+
+# read in data
+
+# prevalence survey estimates, with years and CIs
+dat.prev <- read_excel("../Data/PrevalenceSurveyData.xlsx",sheet="Over15yrs")
+
+# get updated survey 1 estimates for Vietnam, Philippines and Myanmar
+# VIETNAM
+country.tmp <- "Vietnam"
+
+viet.ann.rate <- 1-0.045
+
+# get first prevalence survey value
+## Bob: back-calculate from 2017-8 such that there is a 4.5% decline
+prev1 <- dat.prev %>% filter(Country==country.tmp) %>% getPrev1(annRate = viet.ann.rate)
+tmp.dat <- dat.prev[dat.prev$Country==country.tmp,]
+error <- mean(c(tmp.dat$`2nd Survey Prevalence`-tmp.dat$`lower CI prev2`,
+                tmp.dat$`upper CI prev2`-tmp.dat$`2nd Survey Prevalence`))
+
+prev1.LCL <- prev1 - error
+prev1.UCL <- prev1 + error
+dat.prev[dat.prev$Country==country.tmp,]$`1st Prevalence` <- prev1
+dat.prev[dat.prev$Country==country.tmp,]$`lower CI prev1` <- prev1.LCL
+dat.prev[dat.prev$Country==country.tmp,]$`upper CI prev1` <- prev1.UCL
+
+###############
+## INDONESIA ##
+###############
+country.tmp <- "Indonesia"
+
+# Per Bob, need to calculate first prevalence such that there is a 50% increase between surveys
+# therefore prev1=prev2/1.5
+tmp.dat <- dat.prev %>% filter(Country==country.tmp)
+prev1 <- tmp.dat$`2nd Survey Prevalence`/1.5
+
+error <- mean(c(tmp.dat$`2nd Survey Prevalence`-tmp.dat$`lower CI prev2`,
+                tmp.dat$`upper CI prev2`-tmp.dat$`2nd Survey Prevalence`))
+prev1.LCL <- prev1 - error
+prev1.UCL <- prev1 + error
+
+dat.prev[dat.prev$Country==country.tmp,]$`1st Prevalence` <- prev1
+dat.prev[dat.prev$Country==country.tmp,]$`lower CI prev1` <- prev1.LCL
+dat.prev[dat.prev$Country==country.tmp,]$`upper CI prev1` <- prev1.UCL
+
+indo.ann.rate <- (tmp.dat$`2nd Survey Prevalence`/prev1)^(1/as.numeric(tmp.dat$`Time between 1st survey and 2nd survey (in years)`))-1
+####
+# PHILIPPINES
+country.tmp <- "Philippines"
+
+# Per Bob, need to calculate first prevalence such that there is a 10.5% increase between surveys
+# therefore prev1=prev2/1.105
+tmp.dat <- dat.prev %>% filter(Country==country.tmp)
+prev1 <- tmp.dat$`2nd Survey Prevalence`/1.105
+
+error <- mean(c(tmp.dat$`2nd Survey Prevalence`-tmp.dat$`lower CI prev2`,
+                tmp.dat$`upper CI prev2`-tmp.dat$`2nd Survey Prevalence`))
+prev1.LCL <- prev1 - error
+prev1.UCL <- prev1 + error
+
+dat.prev[dat.prev$Country==country.tmp,]$`1st Prevalence` <- prev1
+dat.prev[dat.prev$Country==country.tmp,]$`lower CI prev1` <- prev1.LCL
+dat.prev[dat.prev$Country==country.tmp,]$`upper CI prev1` <- prev1.UCL
+
+phil.ann.rate <- (tmp.dat$`2nd Survey Prevalence`/prev1)^(1/as.numeric(tmp.dat$`Time between 1st survey and 2nd survey (in years)`))-1
+
+####
+# MYANMAR
+country.tmp <- "Myanmar"
+mya.ann.rate <- 1-0.085
+
+# total change between first and second prevalence is 51%; therefore first prevalence should be prev2/1.51
+tmp.dat <- dat.prev %>% filter(Country==country.tmp)
+prev1 <- tmp.dat$`2nd Survey Prevalence`/0.49
+
+error <- mean(c(tmp.dat$`2nd Survey Prevalence`-tmp.dat$`lower CI prev2`,
+                tmp.dat$`upper CI prev2`-tmp.dat$`2nd Survey Prevalence`))
+prev1.LCL <- prev1 - error
+prev1.UCL <- prev1 + error
+
+dat.prev[dat.prev$Country==country.tmp,]$`1st Prevalence` <- prev1
+dat.prev[dat.prev$Country==country.tmp,]$`lower CI prev1` <- prev1.LCL
+dat.prev[dat.prev$Country==country.tmp,]$`upper CI prev1` <- prev1.UCL
+
+mya.ann.rate <- 1-(tmp.dat$`2nd Survey Prevalence`/prev1)^(1/as.numeric(tmp.dat$`Time between 1st survey and 2nd survey (in years)`))
+#####
+
+# data on treatments 
+dat.cure <- read_excel("../Data/AnnualTreatments.xlsx",sheet="Sheet1")
+
+# number of simulations to run
+M <- 100000
+M2 <- 10000
+
+# untreated TB durations tested
+unDxTBdur <- seq(3,7)
+
+# read in results from runABCsims.R
+load("../Results/durEstsSIR.RData")
+load("../Results/simPrevalences_SIR.RData")
+load("../Results/allSimResultsSIR.RData")
+
+```
+
+## Methods
+
+### Estimation of the duration of disease
+We leverage countries with two prevalence surveys to determine duration and incidence of TB each year between the two prevalence surveys. To do this, we use data on cures and deaths from TB for each country modeled here. We assume that the ratio of prevalence to incidence is not changing over the studied time period (which implies that disease duration is also not changing). As a first, most simple approach to this problem, we determine what the ratio of prevalence to incidence must be to get us to the value of the second prevalence survey. We calculate prevalence in year $t$, $P_t$ as a function of the prior year's prevalence, number treated, number who died and the incidence in the prior year, as follows: $P_t=P_{t-1}-C_{t-1}-D_{t-1}+I_{t-1}$, where $C_t$ are the number of treated (or cured) cases of TB in year $t$ and $D_t$ are the number of deaths or self cures from TB in year $t$. We assume that the number who die or self cure have an average duration of 5 years (though we run a sensitivity analysis for this) and estimate the size of this population to be $D_t=(1/\delta_u)*(P_t-C_t)$, where $\delta_u$ is the duration of untreated disease. 
+
+We observe prevalence at two time points and have annual treatment and mortality data.
+
+We provide more detail on the estimates of prevalence for each country below. We couple prevalence per 100,000 individuals with the population level estimates when the prevalence surveys were conducted to get the total number of prevalent TB cases, which we use in our calculation. 
+
+We use an approach similar to sample importance resampling to estimate the duration of treated disease and run all analyses. We detail the approach here. First we use the confidence intervals for each prevalence survey estimate and assume normality to get a standard deviation for each prevalence survey value. We then run `r M` iterations of the following process. We then generate a potential first prevalence survey values from the normal distribution assumed from the prevalence estimate. We sample a possible duration of treated disease from a uniform(1,6) distribution. With these two values, we run our model to get an estimated second prevalence survey estimate. We then calculate the normal density value for these first and second prevalence survey values, using the estimated normal distribution. If we call these probabilities from the normal distribution $p_{1i}$ and $p_{2i}$ for iteration $i$ then the weight is calculated as $w_i=p_{1i}p_{2i}$. This means we get higher weights for scenarios that generate prevalence survey values that are closer to the observed values. We create normalized weights as $\tilde{w}_i=\frac{w_i}{\sum w_i}$.
+
+We use these normalized weights to generate a posterior distribution of the treated disease duration estimates. This is done by sampling `r M2` values from the duration values sampled form the uniform distribution previously weighted by the normalized weights to get a posterior distribution of the duration of treated disease.
+
+We perform a sensitivity analysis for the assumed duration of untreated duration of TB disease, $\delta_u$. Our primary simulation assumes that this is 5 years. But we also run the simulations for values ranging from 3 to 7 years.
+
+### Input Data
+We first provide the prevalence survey data used in out calculations. We note that the first survey prevalence estimates for Vietnam, Philippines and Myanmar are calculated from the second prevalence survey and that between the two surveys the annual rate of change in prevalence was -4.5%, 1.2% and -8.5%, respectively.
+
+```{r, echo=FALSE}
+dat.prev %>% filter(Country != "Bangladesh") %>%
+  select(!c("First prevalence survey year","Second prevalence survey year","Overall percent change in prevalence between 1st and 2nd surveys")) %>%
+  kbl() %>%
+  kable_styling()
+```
+
+## Results
+### Duration estimates
+
+First we provide the duration estimates for each country assuming a five year duration of untreated disease.
+
+```{r, echo=FALSE}
+# create a data frame with all the results in it
+durEsts <- bind_rows(dur.ests.camb,dur.ests.china,dur.ests.indo,dur.ests.mya,dur.ests.phil,dur.ests.viet)
+Country <- data.frame(rep(c("Cambodia","China","Indonesia","Myanmar","Philippines","Vietnam"),each=length(unDxTBdur)))
+names(Country) <- "Country"
+durEsts <- bind_cols(Country,durEsts)
+
+# output a table with duration estimates when untreated TB duration is 5 years
+durEsts %>% filter(durEsts$`Assumed duration of untreated disease`==5) %>%
+  kbl() %>%
+  kable_styling()
+
+```
+
+
+We also consider all values of untreated disease that range between 3 and 7 years. The following figure shows these results.
+
+
+```{r, echo=FALSE}
+figure1 <- ggplot(durEsts, aes(x=Country, y=`Duration of treated disease`)) + 
+    geom_pointrange(aes(ymin=LCL,ymax=UCL,color=as.factor(`Assumed duration of untreated disease`)),
+                    position=position_dodge(0.5))+
+    theme_bw() +
+  theme(legend.position = "bottom")+
+  labs(y="Average duration of time from first becoming \ninfectious to initiation of curative therapy (years)") +
+  guides(color=guide_legend(title="Duration of untreated disease (years)"))
+
+figure1
+
+ggsave("../plots/duration-ests-by-country.png")
+
+```
+
+
+### Estimated annual prevalence 
+
+We can also show the annual estimated prevalence for the duration estimate by country. This shows the estimated annual prevalences using the first prevalence survey value for varying values of untreated TB duration.
+
+```{r, echo=FALSE}
+country.tmp <- "Vietnam"
+y1.v <- dat.prev$`First prevalence survey year`[dat.prev$Country==country.tmp]
+y2.v <- dat.prev$`Second prevalence survey year`[dat.prev$Country==country.tmp]
+cures.v <- dat.cure$cured[dat.cure$Country==country.tmp]
+pop.v <- read.csv("../Data/vietnam-pop.csv")
+pop1.v <- pop.v$Total.Population[pop.v$label==y1.v]
+prev1.v.n <- (dat.prev$`1st Prevalence`[dat.prev$Country==country.tmp]/1000)*(pop1.v/100000)
+
+country.tmp <- "Indonesia"
+y1.i <- dat.prev$`First prevalence survey year`[dat.prev$Country==country.tmp]
+y2.i <- dat.prev$`Second prevalence survey year`[dat.prev$Country==country.tmp]
+cures.i <- dat.cure$cured[dat.cure$Country==country.tmp]
+pop.i <- read.csv("../Data/indo-pop.csv")
+pop1.i <- pop.i$Total.Population[pop.i$label==y1.i]
+prev1.i.n <- (dat.prev$`1st Prevalence`[dat.prev$Country==country.tmp]/1000)*(pop1.i/100000)
+
+country.tmp <- "China"
+y1.c <- dat.prev$`First prevalence survey year`[dat.prev$Country==country.tmp]
+y2.c <- dat.prev$`Second prevalence survey year`[dat.prev$Country==country.tmp]
+cures.c <- dat.cure$cured[dat.cure$Country==country.tmp]
+pop.c <- read.csv("../Data/china-pop.csv")
+pop1.c <- pop.c$Total.Population[pop.c$label==y1.c]
+prev1.c.n <- (dat.prev$`1st Prevalence`[dat.prev$Country==country.tmp]/1000)*(pop1.c/100000)
+
+country.tmp <- "Cambodia"
+y1.ca <- dat.prev$`First prevalence survey year`[dat.prev$Country==country.tmp]
+y2.ca <- dat.prev$`Second prevalence survey year`[dat.prev$Country==country.tmp]
+cures.ca <- dat.cure$cured[dat.cure$Country==country.tmp]
+pop.ca <- read.csv("../Data/camb-pop.csv")
+pop1.ca <- pop.ca$Total.Population[pop.ca$label==y1.ca]
+prev1.ca.n <- (dat.prev$`1st Prevalence`[dat.prev$Country==country.tmp]/1000)*(pop1.ca/100000)
+
+country.tmp <- "Philippines"
+y1.p <- dat.prev$`First prevalence survey year`[dat.prev$Country==country.tmp]
+y2.p <- dat.prev$`Second prevalence survey year`[dat.prev$Country==country.tmp]
+cures.p <- dat.cure$cured[dat.cure$Country==country.tmp]
+pop.p <- read.csv("../Data/phil-pop.csv")
+pop1.p <- pop.p$Total.Population[pop.p$label==y1.p]
+prev1.p.n <- (dat.prev$`1st Prevalence`[dat.prev$Country==country.tmp]/1000)*(pop1.p/100000)
+
+country.tmp <- "Myanmar"
+y1.m <- dat.prev$`First prevalence survey year`[dat.prev$Country==country.tmp]
+y2.m <- dat.prev$`Second prevalence survey year`[dat.prev$Country==country.tmp]
+cures.m <- dat.cure$cured[dat.cure$Country==country.tmp]
+pop.m <- read.csv("../Data/myanmar-pop.csv")
+pop1.m <- pop.m$Total.Population[pop.m$label==y1.m]
+prev1.m.n <- (dat.prev$`1st Prevalence`[dat.prev$Country==country.tmp]/1000)*(pop1.m/100000)
+
+viet.prev.mean <- matrix(0,nc=length(c(3:7)),nr=y2.v-y1.v+1)
+indo.prev.mean <- matrix(0,nc=length(c(3:7)),nr=y2.i-y1.i+1)
+china.prev.mean <- matrix(0,nc=length(c(3:7)),nr=y2.c-y1.c+1)
+camb.prev.mean <- matrix(0,nc=length(c(3:7)),nr=y2.ca-y1.ca+1)
+phil.prev.mean <- matrix(0,nc=length(c(3:7)),nr=y2.p-y1.p+1)
+mya.prev.mean <- matrix(0,nc=length(c(3:7)),nr=y2.m-y1.m+1)
+for(i in 1:5){
+  viet.prev.mean[,i] <- calcAnnPrev(duration=dur.ests.viet$`Duration of treated disease`[i],prev1=prev1.v.n,                            cures=cures.v,years=c(y1.v:y2.v),unDxTBdur=i+2)
+
+  indo.prev.mean[,i] <- calcAnnPrev(duration=dur.ests.indo$`Duration of treated disease`[i],prev1=prev1.i.n,
+                              cures=cures.i,years=c(y1.i:y2.i),unDxTBdur=i+2)
+  
+  china.prev.mean[,i] <- calcAnnPrev(duration=dur.ests.china$`Duration of treated disease`[i],prev1=prev1.c.n,
+                              cures=cures.c,years=c(y1.c:y2.c),unDxTBdur=i+2)
+
+  camb.prev.mean[,i] <- calcAnnPrev(duration=dur.ests.camb$`Duration of treated disease`[i],prev1=prev1.ca.n,
+                              cures=cures.ca,years=c(y1.ca:y2.ca),unDxTBdur=i+2)
+
+  phil.prev.mean[,i] <- calcAnnPrev(duration=dur.ests.phil$`Duration of treated disease`[i],prev1=prev1.p.n,
+                              cures=cures.p,years=c(y1.p:y2.p),unDxTBdur=i+2)
+
+  mya.prev.mean[,i] <- calcAnnPrev(duration=dur.ests.mya$`Duration of treated disease`[i],prev1=prev1.m.n,
+                              cures=cures.m,years=c(y1.m:y2.m),unDxTBdur=i+2)
+}
+
+# put estimated prevalences in long format
+prev.dat.v <- getPrevLong(viet.prev.mean,y1.v,y2.v,pop.v,cures.v,country.name="Vietnam",sim.dat.viet)
+prev.dat.i <- getPrevLong(indo.prev.mean,y1.i,y2.i,pop.i,cures.i,country.name="Indonesia",sim.dat.indo)
+prev.dat.c <- getPrevLong(china.prev.mean,y1.c,y2.c,pop.c,cures.c,country.name="China",sim.dat.china)
+prev.dat.ca <- getPrevLong(camb.prev.mean,y1.ca,y2.ca,pop.ca,cures.ca,country.name="Cambodia",sim.dat.camb)
+prev.dat.p <- getPrevLong(phil.prev.mean,y1.p,y2.p,pop.p,cures.p,country.name="Philippines",sim.dat.phil)
+prev.dat.m <- getPrevLong(mya.prev.mean,y1.m,y2.m,pop.m,cures.m,country.name="Myanmar",sim.dat.mya)
+
+all.prev.data <- bind_rows(prev.dat.c,prev.dat.ca,prev.dat.i,prev.dat.m,prev.dat.p,prev.dat.v)
+all.prev.data$Year <- as.numeric(all.prev.data$Year)
+```
+
+Here we plot the mean of the prevalences obtained through the approach used to get the CIs (i.e. sampling duration and first prevalence values that were selected from the ABC algorithm and running these through the model).
+
+```{r, echo=FALSE}
+# plots prevalence using resampling approach and averaging across estimates (same approach used to get CIs)
+prev.by.duration  <- ggplot(all.prev.data, aes(Year, Prev100k.sim, color = `Untreated duration`)) +
+  geom_point() +
+  geom_line() +
+  labs(y="Prevalence per 100k",color="Disease duration\namong persons \nwith untreated disease") +
+  theme_bw() +
+  theme(legend.position="bottom") +
+  facet_wrap(~Country,scales="free_y",ncol=2) +
+  scale_x_continuous(n.breaks=5)
+
+prev.by.duration
+
+
+ggsave("../plots/prev-ests-by-country-duration.png")
+
+```
+
+
+We can also show the uncertainty in prevalence estimates. Following is a plot of the estimated annual prevalence incorporating for uncertainty in the first prevalence value and the uncertainty in the duration estimate.
+
+```{r, echo=FALSE}
+# generate a plot for each country with prevalence over time and proportion of prevalent disease treated
+prev.surv.data <- data.frame(Year=c(dat.prev$`First prevalence survey year`,dat.prev$`Second prevalence survey year`),
+                             Prevalence=c(dat.prev$`1st Prevalence`,dat.prev$`2nd Survey Prevalence`),
+                             Country=rep(dat.prev$Country,2))
+prev.surv.data <- prev.surv.data %>% filter(Country != "Bangladesh")
+
+all.prev.data.5 <- all.prev.data[all.prev.data$`Untreated duration`==5,]
+prev.by.country <- ggplot(all.prev.data.5,aes(factor(Year),Prev100k.sim,group=1)) +
+  geom_point() +
+  geom_line() +
+  geom_ribbon(aes(ymin=LCL,ymax=UCL),alpha=0.3,fill="blue") +
+  theme_bw() +
+  xlab("Year") +
+  ylab("Prevalence per 100k") +
+  scale_x_discrete(breaks = levels(as.factor(all.prev.data.5$Year))[c(T, rep(F, 3))]) +
+  facet_wrap(~ Country,scales="free_y",ncol=2) +
+  geom_point(data=prev.surv.data,aes(x=factor(Year),y=Prevalence),color="blue",shape=8)
+
+prev.by.country
+
+ggsave("../plots/prev-ests-by-country-CIs.png")
+
+```
+
+We plot the proportion of prevalence cases treated each year. This is done by taking the number of reported treatment starts divided by the number of prevalent TB cases each year.
+
+```{r, echo=FALSE}
+# plot the proportion of prevalent cases treated
+prop.trt.plot <- ggplot(all.prev.data.5,aes(Year,`Prop treated`,color=Country)) +
+  geom_point() +
+  geom_line() +
+  xlab("Year") +
+  ylab("Proportion of Prevalence Cases treated") +
+  theme_bw()
+
+prop.trt.plot
+
+ggsave("../plots/prop-treated-by-country.png")
+```
+
+### Cures related to change in prevalence
+We consider the relationship between the proportion of prevalent cases treated and the annual change in prevalence per 100k. Here the annual change is found by taking the difference between the prevalence per 100k.
+
+```{r, echo=FALSE}
+# plot the proportion prevalent cases treated by the change in prevalence each year
+
+# fit model and store R^2
+fit1 <- lm(PrevDelta~`Prop treated`,data=all.prev.data.5)
+r.2 <- round(summary(fit1)$r.squared,2)
+fig1.r2 <- ~~italic(r)^2~"="~r.2
+
+# all the data together
+overall.prevDelta.trt <- ggplot(all.prev.data.5,aes(x=`Prop treated`,y=PrevDelta)) +
+  geom_point() +
+  ylab("Annual change in prevalence per 100k") +
+  xlab("Proportion of prevalent cases treated") +
+  ggtitle("Overall relationship between the \nproportion treated and change in Prevalence") +
+  theme_bw() +
+  stat_smooth(method='lm',
+              formula=y~x,
+              geom="smooth") +
+  geom_text(x = 0.55, y = 15, label = paste("~R^{2}==",r.2), parse = TRUE)
+
+overall.prevDelta.trt
+
+ggsave("../plots/prev-prop-trtd.png")
+```
+
+We can look at these plots by country.
+
+```{r, echo=FALSE}
+# fits stratified by countries
+country.prevDelta.trt <- ggplot(all.prev.data.5,aes(x=`Prop treated`,y=PrevDelta,col=Country)) +
+  geom_point() +
+  ylab("Annual change in prevalence per 100k") +
+  xlab("Proportion of prevalent cases treated") +
+  ggtitle("Country level relationship between the \nproportion treated and change in Prevalence") +
+  theme_bw() +
+  stat_smooth(method='lm',
+              formula=y~x,
+              geom="smooth")
+
+country.prevDelta.trt
+
+# get slopes for these fitted lines
+# fit.all <- lm(PrevDelta~`Prop treated`,data=all.prev.data.5)
+# 
+# fit.country <- all.prev.data.5 %>%
+#   group_by(Country) %>%
+#   group_modify(~tidy(lm(PrevDelta~`Prop treated`,data=.)))
+# 
+# # create table of these results
+# all.res.tidy <- data.frame(matrix(c("Overall",fit.all$coefficients[2],1-pf(summary(fit.all)$fstatistic[1],summary(fit.all)$fstatistic[2],summary(fit.all)$fstatistic[3])),nr=1))
+# names(all.res.tidy) <- c("Country","estimate","p.value")
+# dat.lm.results.deltaprev <- rbind(all.res.tidy,data.frame(fit.country[2*c(1:6),c(1,3,6)]))
+# 
+# # change to make th estimate per a 10% increase in treatment
+# dat.lm.results.deltaprev$estimate <- round(as.numeric(dat.lm.results.deltaprev$estimate),2)/10
+# dat.lm.results.deltaprev$p.value <- round(as.numeric(dat.lm.results.deltaprev$p.value),4)
+# 
+# names(dat.lm.results.deltaprev)[2:3] <- c("Estimate per 0.1 increase","p-value")
+# 
+# dat.lm.results.deltaprev %>% 
+#   kbl(caption="Linear regression fit to relationship between the proportion treated and the annual change in estimated prevalence overall and by country. Estimates shown are per 10% increase in the percent of cases treated.") %>%
+#   kable_styling()
+
+
+```
+
+
+
+
+### Proportion of prevalent cases treated related to population-adjusted Change in prevalance
+The other way to show this is to consider the change in prevalence each year divided by the prevalence in that year to get a relative change in prevalence.
+
+```{r, echo=FALSE}
+# create a variable which is percent change in prevalence
+all.prev.data.5$PrevDeltaPerc <- round((all.prev.data.5$PrevDelta/all.prev.data.5$Prev100k.sim)*100,2)
+
+fit.prev <- lm(PrevDeltaPerc~`Prop treated`,data=all.prev.data.5)
+r.2.prev <- round(summary(fit.prev)$r.squared,2)
+ggplot(all.prev.data.5,aes(x=`Prop treated`,y=PrevDeltaPerc)) +
+  geom_point() +
+  ylab("Annual percent change in prevalence") +
+  xlab("Proportion of prevalent cases treated") +
+  ggtitle("Overall relationship between the \nproportion prevalent cases treated and change in prevalence") +
+  theme_bw() +
+  stat_smooth(method='lm',
+              formula=y~x,
+              geom="smooth") +
+   geom_text(x = 0.55, y = 5, label = paste("~R^{2}==",r.2.prev), parse = TRUE)
+ggsave("../plots/prev-prop-trtd.png") 
+
+ggplot(all.prev.data.5,aes(x=`Prop treated`,y=PrevDeltaPerc)) +
+  geom_point() +
+  ylab("Annual percent change in prevalence") +
+  xlab("Proportion of prevalent cases treated") +
+  ggtitle("Overall relationship between the \nproportion prevalent cases treated and change in prevalence") +
+  theme_bw() +
+  stat_smooth(method='loess',
+              formula=y~x,
+              geom="smooth")
+```
+
+We finally plot this by country.
+
+```{r, echo=FALSE}
+# fits stratified by countries
+ggplot(all.prev.data.5,aes(x=`Prop treated`,y=PrevDeltaPerc,col=Country)) +
+  geom_point() +
+  ylab("Annual percent change in prevalence") +
+  xlab("Proportion of prevalent cases treated") +
+  theme_bw() +
+  stat_smooth(method='lm',
+              formula=y~x,
+              geom="smooth")
+ggsave("../plots/prev-prop-trtd-by-country.png") 
+
+# get slopes for these fitted lines
+fit.all.3 <- lm(PrevDeltaPerc~`Prop treated`,data=all.prev.data.5)
+
+fit.country.3 <- all.prev.data.5 %>%
+  group_by(Country) %>%
+  group_modify(~tidy(lm(PrevDeltaPerc~`Prop treated`,data=.)))
+
+# create table of these results
+all.res.tidy.3 <- data.frame(matrix(c("Overall",fit.all.3$coefficients[2],1-pf(summary(fit.all.3)$fstatistic[1],summary(fit.all.3)$fstatistic[2],summary(fit.all.3)$fstatistic[3])),nr=1))
+names(all.res.tidy.3) <- c("Country","estimate","p.value")
+dat.lm.results.deltaprev.3 <- rbind(all.res.tidy.3,data.frame(fit.country.3[2*c(1:6),c(1,3,6)]))
+
+dat.lm.results.deltaprev.3$estimate <- round(as.numeric(dat.lm.results.deltaprev.3$estimate),2)/10
+dat.lm.results.deltaprev.3$p.value <- round(as.numeric(dat.lm.results.deltaprev.3$p.value),4)
+
+names(dat.lm.results.deltaprev.3)[2:3] <- c("Estimate per 0.1 increase","p-value")
+
+dat.lm.results.deltaprev.3 %>% 
+  kbl(caption="Linear regression fit to relationship between the proportion prevalent individuals treated and the annual percent change in prevalence overall and by country. Estimates shown are per 10% increase in the proportion of treated cases.") %>%   kable_styling()
+
+# what is associated with a 10% reduction in prevalence?
+(-10-fit.all.3$coefficients[1])/fit.all.3$coefficients[2]
+                                                       
+# what is associated with a 20% reduction in prevalence?
+(-20-fit.all.3$coefficients[1])/fit.all.3$coefficients[2]
+```
+
+
+## All model results
+ 
+Finally we show all the model results below.
+
+```{r, echo=F}
+row.names(all.prev.data.5) <- NULL
+all.prev.5.tab <- all.prev.data.5 %>% select(-Prev100k)
+all.prev.5.tab <- all.prev.5.tab %>% relocate(LCL,.after=Prev100k.sim)
+all.prev.5.tab <- all.prev.5.tab %>% relocate(UCL,.after=LCL)
+
+all.prev.5.tab %>% 
+  kbl(col.names=c("Year","Untreated duration","Country","Prevalent cases","Popn","Treatment starts","Proportion treated","Prev per 100k","Prev LCL","Prev UCL","Change in Prevalence","%Change in Prevalence")) %>%   kable_styling()
+
+
+
+```
